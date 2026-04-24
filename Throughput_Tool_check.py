@@ -530,9 +530,13 @@ body.light-theme .control-panel {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  margin-bottom: 10px; 
 }
 
-.ctrl-row.full { flex-wrap: nowrap; }
+.ctrl-row.full { 
+  flex-wrap: nowrap; 
+  gap:10px;
+}
 .ctrl-row select { flex: 1; min-width: 0; }
 .ctrl-row.buttons {
   display: grid;
@@ -748,7 +752,8 @@ body.light-theme .metric-value.frame { color: #2563eb; }
 .log-container {
   display: flex;
   flex-direction: column;
-  min-height: 100px;
+  height: 140px;
+  min-height: 120px;
   flex-shrink: 0;
   border-top: 1px solid var(--border);
 }
@@ -1118,7 +1123,7 @@ body.light-theme .log {
 }
 .log-entry:hover {
   color: var(--text-primary);
-  padding-left: 14px;
+  # padding-left: 14px;
 }
 .log-entry.ok   { 
   color: var(--green-light); 
@@ -1395,9 +1400,14 @@ logResizer.addEventListener('mousedown', () => {
 
 function handleResize(e) {
   if (!isResizing) return;
+
   const mainRect = document.querySelector('.main').getBoundingClientRect();
   const newHeight = mainRect.bottom - e.clientY;
-  if (newHeight > 60 && newHeight < mainRect.height - 100) {
+
+  const minHeight = 120;
+  const maxHeight = mainRect.height * 0.4;  // limit to 40%
+
+  if (newHeight >= minHeight && newHeight <= maxHeight) {
     logContainer.style.height = newHeight + 'px';
     drawChart();
   }
