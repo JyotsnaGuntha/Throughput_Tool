@@ -503,7 +503,7 @@ body.light-theme .theme-toggle:hover {
   display: flex; 
   flex: 1; 
   overflow: hidden; 
-  flex-direction: row-reverse;
+  # flex-direction: row-reverse;
 }
 
 /* Right Control Panel */
