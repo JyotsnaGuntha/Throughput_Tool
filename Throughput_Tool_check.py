@@ -499,86 +499,280 @@ body.light-theme .theme-toggle:hover {
 
 
 /* Layout */
-.layout { display: flex; flex: 1; overflow: hidden; }
+.layout { 
+  display: flex; 
+  flex: 1; 
+  overflow: hidden; 
+  flex-direction: row-reverse;
+}
 
-/* Sidebar */
-.sidebar {
-  width: 280px;
+/* Right Control Panel */
+.control-panel {
+  width: 320px;
   flex-shrink: 0;
   background: var(--surface);
-  border-right: 1px solid var(--border);
-  padding: 16px;
+  border-left: 1px solid var(--border);
+  padding: 18px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-.sec-label {
-  font-size: 10px; 
-  font-weight: 700; 
-  letter-spacing: .12em;
-  text-transform: uppercase; 
-  color: var(--text-muted);
-  padding: 16px 2px 10px;
-  margin-top: 8px;
-}
-.sec-label:first-child { margin-top: 0; }
-.field { margin-bottom: 12px; }
-.field > label {
-  display: block; 
-  font-size: 12px; 
-  font-weight: 600;
-  color: var(--text-secondary); 
-  margin-bottom: 6px;
-  letter-spacing: 0.5px;
+  gap: 16px;
 }
 
-/* Port row */
-.port-row { 
-  display: flex; 
-  gap: 8px; 
-  align-items: center; 
+body.light-theme .control-panel {
+  background: #ffffff;
+  border-left-color: #d1d5db;
 }
-.port-row select { flex: 1; }
-.icon-btn {
-  flex-shrink: 0;
-  width: 38px; 
+
+/* Control rows */
+.ctrl-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ctrl-row.full { flex-wrap: nowrap; }
+.ctrl-row select { flex: 1; min-width: 0; }
+.ctrl-row.buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* Icon-only buttons */
+.btn-icon {
+  width: 38px;
   height: 38px;
+  padding: 0;
+  min-width: 38px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
-  border: 1px solid var(--border-lt);
-  border-radius: 9px;
-  display: flex; 
-  align-items: center; 
-  justify-content: center;
-  cursor: pointer;
-  transition: all .2s ease;
   color: var(--blue-light);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 0;
 }
-.icon-btn:hover { 
+.btn-icon svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.btn-icon:hover {
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
   border-color: var(--blue);
   transform: translateY(-1px);
 }
+.btn-icon:active {
+  transform: scale(0.95);
+}
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
-body.light-theme .icon-btn {
+body.light-theme .btn-icon {
   background: #f3f4f6;
   color: #3b82f6;
 }
-
-body.light-theme .icon-btn:hover {
+body.light-theme .btn-icon:hover {
   background: #e5e7eb;
   border-color: #3b82f6;
 }
-.icon-btn:active { 
-  transform: scale(.95); 
+
+/* Action buttons row */
+.btn-action {
+  flex: 1;
+  height: 36px;
+  border: none;
+  border-radius: 7px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  padding: 0 10px;
+  white-space: nowrap;
 }
-.icon-btn svg { 
-  width: 16px; 
-  height: 16px; 
-  flex-shrink: 0; 
+.btn-action::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.1);
+  transition: left 0.3s ease;
 }
-.spin { animation: spin .6s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+.btn-action:not(:disabled):hover::before {
+  left: 100%;
+}
+.btn-action svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.btn-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-action:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.btn-action.start {
+  background: linear-gradient(135deg, var(--green) 0%, var(--green-light) 100%);
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(16, 185, 129, 0.2);
+}
+.btn-action.start:not(:disabled):hover {
+  box-shadow: 0 5px 18px rgba(16, 185, 129, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-action.stop {
+  background: linear-gradient(135deg, var(--red) 0%, var(--red-light) 100%);
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(239, 68, 68, 0.2);
+}
+.btn-action.stop:not(:disabled):hover {
+  box-shadow: 0 5px 18px rgba(239, 68, 68, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-action.export {
+  background: linear-gradient(135deg, var(--purple) 0%, var(--cyan) 100%);
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(139, 92, 246, 0.2);
+}
+.btn-action.export:not(:disabled):hover {
+  box-shadow: 0 5px 18px rgba(139, 92, 246, 0.35);
+  transform: translateY(-1px);
+}
+
+/* Control section label */
+.ctrl-section {
+  margin-top: 8px;
+}
+.ctrl-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  display: block;
+}
+
+body.light-theme .ctrl-section-title {
+  color: #6b7280;
+}
+
+/* Metrics display */
+.metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+body.light-theme .metric-row {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+
+.metric-row:hover {
+  border-color: var(--border-lt);
+}
+
+.metric-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.metric-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.metric-value.blown { color: var(--red-light); }
+.metric-value.avg { color: var(--green-light); }
+.metric-value.max { color: var(--amber); }
+.metric-value.frame { color: var(--blue-light); }
+
+body.light-theme .metric-value.blown { color: #dc2626; }
+body.light-theme .metric-value.avg { color: #059669; }
+body.light-theme .metric-value.max { color: #d97706; }
+body.light-theme .metric-value.frame { color: #2563eb; }
+
+/* Main content area */
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Resizable log area */
+.log-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+
+.log-resizer {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  cursor: ns-resize;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.log-resizer:hover {
+  background: var(--blue-light);
+}
+
+body.light-theme .log-resizer {
+  background: #d1d5db;
+}
+
+body.light-theme .log-resizer:hover {
+  background: #3b82f6;
+}
 
 select, input[type=text] {
   width: 100%;
@@ -606,6 +800,25 @@ select:focus, input[type=text]:focus {
   border-color: var(--blue); 
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
   outline: none;
+}
+
+body.light-theme select,
+body.light-theme input[type=text] {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  color: #111827;
+}
+
+body.light-theme select:hover,
+body.light-theme input[type=text]:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+body.light-theme select:focus,
+body.light-theme input[type=text]:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .btn {
@@ -867,8 +1080,8 @@ body.light-theme .chart-box {
 
 /* Log */
 .log {
-  flex-shrink: 0; 
-  height: 120px; 
+  flex: 1;
+  min-height: 0;
   border-top: 1px solid var(--border);
   background: linear-gradient(135deg, var(--surface) 0%, rgba(42, 50, 63, 0.6) 100%);
   display: flex; 
@@ -1065,82 +1278,10 @@ body.light-theme #toast {
 
 <div class="layout">
 
-  <div class="sidebar">
-
-    <div class="sec-label">Connection</div>
-    <div class="field">
-      <label>COM Port</label>
-      <div class="port-row">
-        <select id="portSel"><option value="">Select port…</option></select>
-        <button class="icon-btn" id="btnRefresh" title="Refresh ports" onclick="app.refreshPorts()">
-          <svg id="refreshIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M1 8a7 7 0 1 0 2-4.9"/>
-            <polyline points="1,3 1,8 6,8"/>
-          </svg>
-        </button>
-      </div>
-    </div>
-    <div class="field">
-      <label>Baud Rate</label>
-      <select id="baudSel">
-        <option>9600</option><option>19200</option><option>38400</option>
-        <option selected>57600</option><option>115200</option>
-        <option>230400</option><option>460800</option><option>921600</option>
-      </select>
-    </div>
-    <button class="btn btn-blue" id="btnConn" onclick="app.toggleConnect()">
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="11" r="2"/><circle cx="11" cy="5" r="2"/><line x1="6.5" y1="9.5" x2="9.5" y2="6.5"/></svg>
-      Connect
-    </button>
-
-    <div class="hr"></div>
-    <div class="sec-label">Analysis</div>
-    <button class="btn btn-green" id="btnStart" onclick="app.startAnalysis()" disabled>
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><polygon points="4,2 14,8 4,14"/></svg>
-      Start Analysis
-    </button>
-    <button class="btn btn-red" id="btnStop" onclick="app.stopAnalysis()" disabled>
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>
-      Stop Analysis
-    </button>
-
-    <div class="hr"></div>
-    <div class="sec-label">Export</div>
-    <button class="btn btn-purple" id="btnExport" onclick="app.exportCsv()" disabled>
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><line x1="2" y1="14" x2="14" y2="14"/></svg>
-      Export CSV
-    </button>
-
-  </div>
-
   <div class="main">
-
-    <!-- 4 stat cards -->
-    <div class="stats">
-      <div class="scard">
-        <div class="scard-lbl">Frames Blown</div>
-        <div class="scard-val c-red" id="svBlown">—</div>
-        <div class="scard-unit">frames &gt; 2000µs threshold</div>
-      </div>
-      <div class="scard">
-        <div class="scard-lbl">Average Time</div>
-        <div class="scard-val c-green" id="svAvg">—</div>
-        <div class="scard-unit">µs per frame</div>
-      </div>
-      <div class="scard">
-        <div class="scard-lbl">Maximum Time</div>
-        <div class="scard-val c-amber" id="svMaxTime">—</div>
-        <div class="scard-unit">µs (peak)</div>
-      </div>
-      <div class="scard">
-        <div class="scard-lbl">Peak Frame</div>
-        <div class="scard-val c-purple" id="svMaxFrame">—</div>
-        <div class="scard-unit">frame index (0–499)</div>
-      </div>
-    </div>
-
+    <!-- Chart area -->
     <div class="chart-area">
-    <div class="chart-hdr">
+      <div class="chart-hdr">
         <span class="chart-ttl">Frame vs. Scheduler Load % (latest chunk)</span>
         <div class="legend">
           <div class="leg-item"><div class="leg-sq ok"></div>Normal (&le;2000µs)</div>
@@ -1151,17 +1292,123 @@ body.light-theme #toast {
       <div class="chart-box"><canvas id="chart"></canvas></div>
     </div>
 
-    <div class="log">
-      <div class="log-hdr">Activity Log</div>
-      <div class="log-body" id="logBody"></div>
+    <!-- Log container with resizable handle -->
+    <div class="log-container">
+      <div class="log-resizer" id="logResizer"></div>
+      <div class="log">
+        <div class="log-hdr">Activity Log</div>
+        <div class="log-body" id="logBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Control Panel -->
+  <div class="control-panel">
+    <!-- Connection Section -->
+    <div class="ctrl-section">
+      <span class="ctrl-section-title">Connection</span>
+      
+      <!-- Row 1: COM Port + Refresh -->
+      <div class="ctrl-row full">
+        <select id="portSel"><option value="">Select port…</option></select>
+        <button class="btn-icon" id="btnRefresh" title="Refresh ports" onclick="app.refreshPorts()">
+          <svg id="refreshIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 8a7 7 0 1 0 2-4.9"/>
+            <polyline points="1,3 1,8 6,8"/>
+          </svg>
+        </button>
+      </div>
+      
+      <!-- Row 2: Baud Rate + Connect -->
+      <div class="ctrl-row full">
+        <select id="baudSel">
+          <option>9600</option><option>19200</option><option>38400</option>
+          <option selected>57600</option><option>115200</option>
+          <option>230400</option><option>460800</option><option>921600</option>
+        </select>
+        <button class="btn-icon" id="btnConn" onclick="app.toggleConnect()" title="Connect/Disconnect">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="11" r="2"/><circle cx="11" cy="5" r="2"/><line x1="6.5" y1="9.5" x2="9.5" y2="6.5"/></svg>
+        </button>
+      </div>
     </div>
 
+    <!-- Analysis Section -->
+    <div class="ctrl-section">
+      <span class="ctrl-section-title">Analysis</span>
+      
+      <!-- Row 3: Action Buttons -->
+      <div class="ctrl-row buttons">
+        <button class="btn-action start" id="btnStart" onclick="app.startAnalysis()" title="Start Analysis" disabled>
+          <svg viewBox="0 0 16 16" fill="currentColor"><polygon points="4,2 14,8 4,14"/></svg>
+          Start
+        </button>
+        <button class="btn-action stop" id="btnStop" onclick="app.stopAnalysis()" title="Stop Analysis" disabled>
+          <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>
+          Stop
+        </button>
+        <button class="btn-action export" id="btnExport" onclick="app.exportCsv()" title="Export CSV" disabled>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><line x1="2" y1="14" x2="14" y2="14"/></svg>
+          CSV
+        </button>
+      </div>
+    </div>
+
+    <!-- Metrics Section -->
+    <div class="ctrl-section">
+      <span class="ctrl-section-title">Metrics</span>
+      <div class="metrics-panel">
+        <div class="metric-row">
+          <span class="metric-label">Frames Blown</span>
+          <span class="metric-value blown" id="svBlown">—</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Avg Time</span>
+          <span class="metric-value avg" id="svAvg">—</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Max Time</span>
+          <span class="metric-value max" id="svMaxTime">—</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Peak Frame</span>
+          <span class="metric-value frame" id="svMaxFrame">—</span>
+        </div>
+      </div>
+    </div>
   </div>
+
 </div>
 
 <div id="toast"></div>
 
 <script>
+// ── Resizable Log Area ────────────────────────────────────────────────────────
+const logResizer = document.getElementById('logResizer');
+const logContainer = document.querySelector('.log-container');
+let isResizing = false;
+
+logResizer.addEventListener('mousedown', () => {
+  isResizing = true;
+  document.addEventListener('mousemove', handleResize);
+  document.addEventListener('mouseup', stopResize);
+});
+
+function handleResize(e) {
+  if (!isResizing) return;
+  const mainRect = document.querySelector('.main').getBoundingClientRect();
+  const newHeight = mainRect.bottom - e.clientY;
+  if (newHeight > 60 && newHeight < mainRect.height - 100) {
+    logContainer.style.height = newHeight + 'px';
+    drawChart();
+  }
+}
+
+function stopResize() {
+  isResizing = false;
+  document.removeEventListener('mousemove', handleResize);
+  document.removeEventListener('mouseup', stopResize);
+}
+
 // ── Chart ─────────────────────────────────────────────────────────────────────
 const cvs = document.getElementById('chart');
 const ctx = cvs.getContext('2d');
@@ -1382,13 +1629,7 @@ const app = (() => {
 
   function sync() {
     const btn = document.getElementById('btnConn');
-    if (connected) {
-      btn.className = 'btn btn-ghost';
-      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg> Disconnect`;
-    } else {
-      btn.className = 'btn btn-blue';
-      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="11" r="2"/><circle cx="11" cy="5" r="2"/><line x1="6.5" y1="9.5" x2="9.5" y2="6.5"/></svg> Connect`;
-    }
+    btn.title = connected ? 'Disconnect from port' : 'Connect to port';
     document.getElementById('btnStart').disabled  = !connected || running;
     document.getElementById('btnStop').disabled   = !running;
     document.getElementById('btnExport').disabled = !canExport;
@@ -1521,9 +1762,9 @@ window = webview.create_window(
     title    = "Throughput Analysis Tool",
     html     = HTML,
     js_api   = api,
-    width    = 1200,
-    height   = 720,
-    min_size = (900, 560),
+    width    = 1400,
+    height   = 800,
+    min_size = (1100, 600),
 )
 
 if __name__ == "__main__":
