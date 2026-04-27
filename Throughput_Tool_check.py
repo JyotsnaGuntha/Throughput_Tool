@@ -16,8 +16,12 @@
 import csv
 import json
 import os
+import shutil
+import subprocess
 import threading
 import time
+import sys
+import tempfile
 from datetime import datetime
 
 import serial
@@ -43,9 +47,166 @@ class Api:
     def __init__(self):
         self._ser: serial.Serial | None = None
         self._running = False
+        self._analysis_running = False
         self._lock = threading.Lock()
         self._data: list[tuple[int, int, int]] = []   # (second, frame_idx, raw_percent)
         self._thread: threading.Thread | None = None
+        self._session_total_us = 0
+        self._session_sample_count = 0
+        self._session_blown = 0
+        self._session_max_us = 0
+        self._session_max_frame = 0
+        self._session_max_value = -1
+        self._last_exported_csv_path: str | None = None
+        self._analysis_excel_path: str | None = None
+        self._analysis_temp_dir: str | None = None
+
+    def _reset_session_state(self) -> None:
+        with self._lock:
+            self._data = []
+            self._session_total_us = 0
+            self._session_sample_count = 0
+            self._session_blown = 0
+            self._session_max_us = 0
+            self._session_max_frame = 0
+            self._session_max_value = -1
+        self._analysis_excel_path = None
+        self._analysis_temp_dir = None
+        self._last_exported_csv_path = None
+
+    def _build_summary(self) -> dict[str, int]:
+        with self._lock:
+            if self._session_sample_count == 0:
+                return {"rows": 0, "seconds": 0, "blown": 0, "avg_us": 0, "max_us": 0, "max_frame": 0}
+
+            seconds = self._data[-1][0] if self._data else 0
+            avg_us = self._session_total_us // self._session_sample_count
+            return {
+                "rows": self._session_sample_count,
+                "seconds": seconds,
+                "blown": self._session_blown,
+                "avg_us": avg_us,
+                "max_us": self._session_max_us,
+                "max_frame": self._session_max_frame,
+            }
+
+    def _write_snapshot_csv(self, filepath: str) -> int:
+        with self._lock:
+            snapshot = list(self._data)
+
+        if not snapshot:
+            raise ValueError("No data to export.")
+
+        chunked_data: dict[int, list[int]] = {}
+        for sec, frame, pct in snapshot:
+            if sec not in chunked_data:
+                chunked_data[sec] = [0] * CHUNK_SIZE
+
+            if 0 <= frame < CHUNK_SIZE:
+                chunked_data[sec][frame] = pct * SCALE_FACTOR
+
+        with open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            header = ["Time_Second"] + [f"Frame_{i}" for i in range(CHUNK_SIZE)]
+            writer.writerow(header)
+
+            for sec in sorted(chunked_data.keys()):
+                writer.writerow([sec] + chunked_data[sec])
+
+        return len(chunked_data)
+
+    def _prepare_analysis_input(self) -> str:
+        if self._last_exported_csv_path and os.path.exists(self._last_exported_csv_path):
+            return self._last_exported_csv_path
+
+        if self._analysis_temp_dir is None:
+            self._analysis_temp_dir = tempfile.mkdtemp(prefix="throughput_analysis_")
+
+        csv_path = os.path.join(self._analysis_temp_dir, "session_export.csv")
+        self._write_snapshot_csv(csv_path)
+        return csv_path
+
+    def _run_analysis_worker(self) -> None:
+        try:
+            input_csv = self._prepare_analysis_input()
+            output_dir = os.path.dirname(input_csv)
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_ml.py")
+
+            completed = subprocess.run(
+                [sys.executable, script_path, "--input", input_csv, "--output-dir", output_dir],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            if completed.returncode != 0:
+                message = completed.stderr.strip() or completed.stdout.strip() or "Analysis failed."
+                window.evaluate_js(
+                    f"window._app && window._app.onAnalysisError({json.dumps(message)})"
+                )
+                return
+
+            try:
+                result = json.loads(completed.stdout.strip() or "{}")
+            except json.JSONDecodeError:
+                window.evaluate_js(
+                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but the model returned an invalid response.')})"
+                )
+                return
+
+            output_path = result.get("output_path")
+            if not output_path or not os.path.exists(output_path):
+                window.evaluate_js(
+                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no Excel report was generated.')})"
+                )
+                return
+
+            self._analysis_excel_path = output_path
+            window.evaluate_js(
+                f"window._app && window._app.onAnalysisComplete({json.dumps({'message': 'Patterns Analyzed Successfully'})})"
+            )
+        except Exception as exc:
+            window.evaluate_js(
+                f"window._app && window._app.onAnalysisError({json.dumps(str(exc))})"
+            )
+        finally:
+            self._analysis_running = False
+
+    def analyze(self) -> str:
+        with self._lock:
+            snapshot_ready = bool(self._data)
+
+        if not snapshot_ready:
+            return json.dumps({"status": "error", "message": "No data available to analyze."})
+        if self._analysis_running:
+            return json.dumps({"status": "error", "message": "Analysis is already running."})
+
+        self._analysis_running = True
+        worker = threading.Thread(target=self._run_analysis_worker, daemon=True)
+        worker.start()
+        return json.dumps({"status": "ok", "message": "Analysis started."})
+
+    def download_excel(self) -> str:
+        if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
+            return json.dumps({"status": "error", "message": "No analyzed Excel report is available."})
+
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"throughput_{ts}_ML_Analyzed.xlsx"
+            result = window.create_file_dialog(
+                webview.FileDialog.SAVE,
+                save_filename=default_name,
+                file_types=["Excel Files (*.xlsx)", "All files (*.*)"]
+            )
+
+            if not result:
+                return json.dumps({"status": "cancelled", "message": "Download cancelled."})
+
+            filepath = result if isinstance(result, str) else result[0]
+            shutil.copyfile(self._analysis_excel_path, filepath)
+            return json.dumps({"status": "ok", "path": filepath})
+        except Exception as exc:
+            return json.dumps({"status": "error", "message": str(exc)})
 
     def get_ports(self) -> str:
         ports = serial.tools.list_ports.comports()
@@ -73,14 +234,13 @@ class Api:
         if not self._ser or not self._ser.is_open:
             return json.dumps({"status": "error", "message": "Not connected to any port."})
         try:
-            with self._lock:
-                self._data = []
-            self._ser.reset_input_buffer()
-            self._ser.write(START_FRAME)
-            self._running = True
-            self._thread = threading.Thread(target=self._receive_loop, daemon=True)
-            self._thread.start()
-            return json.dumps({"status": "ok"})
+          self._reset_session_state()
+          self._ser.reset_input_buffer()
+          self._ser.write(START_FRAME)
+          self._running = True
+          self._thread = threading.Thread(target=self._receive_loop, daemon=True)
+          self._thread.start()
+          return json.dumps({"status": "ok"})
         except Exception as exc:
             return json.dumps({"status": "error", "message": str(exc)})
 
@@ -99,23 +259,34 @@ class Api:
                 continue
             second += 1
             rows: list[tuple[int, int, int]] = []
+            chunk_total_us = 0
+            chunk_blown = 0
+            chunk_max_us = -1
+            chunk_max_frame = 0
             for i, raw in enumerate(chunk):
                 rows.append((second, i, raw))   # store raw percent (0-100)
+                raw_us = raw * SCALE_FACTOR
+                chunk_total_us += raw_us
+                if raw_us > BLOWN_THRESHOLD:
+                  chunk_blown += 1
+                if raw_us > chunk_max_us:
+                    chunk_max_us = raw_us
+                    chunk_max_frame = i
             with self._lock:
                 self._data.extend(rows)
-
-            # Compute stats for this chunk
-            blown = sum(1 for r in chunk if (r * SCALE_FACTOR) > BLOWN_THRESHOLD)
-            avg_us = sum(r * SCALE_FACTOR for r in chunk) // CHUNK_SIZE
-            max_val = max(chunk)
-            max_frame = chunk.index(max_val)   # 0-based frame index
-            max_us = max_val * SCALE_FACTOR
+                self._session_sample_count += len(chunk)
+                self._session_total_us += chunk_total_us
+                self._session_blown += chunk_blown
+                if chunk_max_us > self._session_max_us:
+                    self._session_max_us = chunk_max_us
+                    self._session_max_frame = chunk_max_frame
 
             # Pass raw percent values for the scatter plot (frame index → percent)
             frame_data = list(chunk)   # list of 500 percent values
+            stats = self._build_summary()
 
             window.evaluate_js(
-                f"window._app && window._app.onChunk({json.dumps({'second': second, 'blown': blown, 'avg_us': avg_us, 'max_us': max_us, 'max_frame': max_frame, 'frame_data': frame_data})})"
+                f"window._app && window._app.onChunk({json.dumps({'second': second, 'blown': stats['blown'], 'avg_us': stats['avg_us'], 'max_us': stats['max_us'], 'max_frame': stats['max_frame'], 'frame_data': frame_data})})"
             )
 
     def stop_analysis(self) -> str:
@@ -171,48 +342,17 @@ class Api:
                 
             filepath = result if isinstance(result, str) else result[0]
 
-            # 3. Group the flat data by the 'second' timestamp
-            chunked_data = {}
-            for sec, frame, pct in snapshot:
-                if sec not in chunked_data:
-                    chunked_data[sec] = [0] * CHUNK_SIZE 
-                
-                if 0 <= frame < CHUNK_SIZE:
-                    chunked_data[sec][frame] = pct * SCALE_FACTOR
+            rows = self._write_snapshot_csv(filepath)
+            self._last_exported_csv_path = filepath
 
-            # 4. Write to the CSV
-            with open(filepath, "w", newline="") as f:
-                writer = csv.writer(f)
-                header = ["Time_Second"] + [f"Frame_{i}" for i in range(CHUNK_SIZE)]
-                writer.writerow(header)
-                
-                for sec in sorted(chunked_data.keys()):
-                    row_data = [sec] + chunked_data[sec]
-                    writer.writerow(row_data)
-                    
-            return json.dumps({"status": "ok", "path": filepath, "rows": len(chunked_data)})
+            return json.dumps({"status": "ok", "path": filepath, "rows": rows})
             
         except Exception as exc:
             return json.dumps({"status": "error", "message": str(exc)})
    
 
     def get_summary(self) -> str:
-        with self._lock:
-            snapshot = list(self._data)
-        if not snapshot:
-            return json.dumps({"rows": 0, "seconds": 0, "blown": 0, "avg_us": 0, "max_us": 0, "max_frame": 0})
-        total_rows = len(snapshot)
-        seconds    = snapshot[-1][0] if snapshot else 0
-        
-        # Updated to check against microsecond threshold
-        blown      = sum(1 for (_, _, pct) in snapshot if (pct * SCALE_FACTOR) > BLOWN_THRESHOLD)
-        
-        avg_us     = sum(pct * SCALE_FACTOR for (_, _, pct) in snapshot) // total_rows
-        max_row    = max(snapshot, key=lambda r: r[2])
-        max_us     = max_row[2] * SCALE_FACTOR
-        max_frame  = max_row[1]
-        return json.dumps({"rows": total_rows, "seconds": seconds, "blown": blown,
-                           "avg_us": avg_us, "max_us": max_us, "max_frame": max_frame})
+      return json.dumps(self._build_summary())
     
 # ─────────────────────────────────────────────
 #  Protocol
@@ -660,6 +800,26 @@ body.light-theme .btn-icon:hover {
 }
 .btn-action.export:not(:disabled):hover {
   box-shadow: 0 5px 18px rgba(139, 92, 246, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-action.analyze {
+  background: linear-gradient(135deg, var(--amber) 0%, var(--blue) 100%);
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(245, 158, 11, 0.2);
+}
+.btn-action.analyze:not(:disabled):hover {
+  box-shadow: 0 5px 18px rgba(245, 158, 11, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-action.download {
+  background: linear-gradient(135deg, var(--green) 0%, var(--blue) 100%);
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(16, 185, 129, 0.2);
+}
+.btn-action.download:not(:disabled):hover {
+  box-shadow: 0 5px 18px rgba(16, 185, 129, 0.35);
   transform: translateY(-1px);
 }
 
@@ -1204,6 +1364,74 @@ body.light-theme #toast {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
+/* Modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 10, 18, 0.65);
+  backdrop-filter: blur(8px);
+  z-index: 10000;
+  padding: 24px;
+}
+.modal-backdrop.show {
+  display: flex;
+}
+.modal-card {
+  width: min(420px, 100%);
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-dark) 100%);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  padding: 24px;
+  text-align: center;
+}
+.modal-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.modal-message {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 20px;
+}
+.modal-close {
+  border: none;
+  border-radius: 10px;
+  height: 40px;
+  padding: 0 18px;
+  min-width: 96px;
+  cursor: pointer;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--blue) 0%, var(--green) 100%);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.25);
+}
+.modal-close:hover {
+  transform: translateY(-1px);
+}
+
+body.light-theme .modal-card {
+  background: #ffffff;
+  border-color: #d1d5db;
+}
+
+body.light-theme .modal-title {
+  color: #6b7280;
+}
+
+body.light-theme .modal-message {
+  color: #111827;
+}
+
 ::-webkit-scrollbar { 
   width: 6px; 
 }
@@ -1255,10 +1483,6 @@ body.light-theme #toast {
     </div>
   </div>
   <div style="display: flex; align-items: center; gap: 16px;">
-    <div class="pill" id="statusPill">
-      <span class="pill-dot"></span>
-      <span id="statusTxt">Disconnected</span>
-    </div>
     <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme">
       <svg class="theme-icon" id="sunIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="5"></circle>
@@ -1281,10 +1505,31 @@ body.light-theme #toast {
 <div class="layout">
 
   <div class="main">
+    <div class="stats">
+      <div class="scard">
+        <div class="scard-lbl">Frames Blown</div>
+        <div class="scard-val c-red" id="svBlown">—</div>
+      </div>
+      <div class="scard">
+        <div class="scard-lbl">Average Time</div>
+        <div class="scard-val c-green" id="svAvg">—</div>
+        <div class="scard-unit">microseconds</div>
+      </div>
+      <div class="scard">
+        <div class="scard-lbl">Maximum Time</div>
+        <div class="scard-val c-amber" id="svMaxTime">—</div>
+        <div class="scard-unit">microseconds</div>
+      </div>
+      <div class="scard">
+        <div class="scard-lbl">Peak Frame</div>
+        <div class="scard-val c-blue" id="svMaxFrame">—</div>
+      </div>
+    </div>
+
     <!-- Chart area -->
     <div class="chart-area">
       <div class="chart-hdr">
-        <span class="chart-ttl">Frame vs. Scheduler Load % (latest chunk)</span>
+        <span class="chart-ttl">Analysis Data View</span>
         <div class="legend">
           <div class="leg-item"><div class="leg-sq ok"></div>Normal (&le;2000µs)</div>
           <div class="leg-item"><div class="leg-sq blown"></div>Blown (&gt;2000µs)</div>
@@ -1292,15 +1537,6 @@ body.light-theme #toast {
         </div>
       </div>
       <div class="chart-box"><canvas id="chart"></canvas></div>
-    </div>
-
-    <!-- Log container with resizable handle -->
-    <div class="log-container">
-      <div class="log-resizer" id="logResizer"></div>
-      <div class="log">
-        <div class="log-hdr">Activity Log</div>
-        <div class="log-body" id="logBody"></div>
-      </div>
     </div>
   </div>
 
@@ -1338,7 +1574,6 @@ body.light-theme #toast {
     <div class="ctrl-section">
       <span class="ctrl-section-title">Analysis</span>
       
-      <!-- Row 3: Action Buttons -->
       <div class="ctrl-row buttons">
         <button class="btn-action start" id="btnStart" onclick="app.startAnalysis()" title="Start Analysis" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><polygon points="4,2 14,8 4,14"/></svg>
@@ -1353,28 +1588,16 @@ body.light-theme #toast {
           CSV
         </button>
       </div>
-    </div>
-
-    <!-- Metrics Section -->
-    <div class="ctrl-section">
-      <span class="ctrl-section-title">Metrics</span>
-      <div class="metrics-panel">
-        <div class="metric-row">
-          <span class="metric-label">Frames Blown</span>
-          <span class="metric-value blown" id="svBlown">—</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Avg Time</span>
-          <span class="metric-value avg" id="svAvg">—</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Max Time</span>
-          <span class="metric-value max" id="svMaxTime">—</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Peak Frame</span>
-          <span class="metric-value frame" id="svMaxFrame">—</span>
-        </div>
+      <div class="hr"></div>
+      <div class="ctrl-row buttons" style="grid-template-columns: 1fr 1fr;">
+        <button class="btn-action analyze" id="btnAnalyze" onclick="app.analyze()" title="Run Analysis" disabled>
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v2H3zm0 4h10v2H3zm0 4h7v2H3z"/></svg>
+          Analyze
+        </button>
+        <button class="btn-action download" id="btnDownloadExcel" onclick="app.downloadExcel()" title="Download Excel" disabled>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><path d="M3 14h10"/></svg>
+          Download Excel
+        </button>
       </div>
     </div>
   </div>
@@ -1382,40 +1605,15 @@ body.light-theme #toast {
 </div>
 
 <div id="toast"></div>
+<div class="modal-backdrop" id="analysisModal">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
+    <div class="modal-title" id="analysisModalTitle">Analysis Complete</div>
+    <div class="modal-message" id="analysisModalMessage">Patterns Analyzed Successfully</div>
+    <button class="modal-close" type="button" onclick="app.closeAnalysisModal()">OK</button>
+  </div>
+</div>
 
 <script>
-// ── Resizable Log Area ────────────────────────────────────────────────────────
-const logResizer = document.getElementById('logResizer');
-const logContainer = document.querySelector('.log-container');
-let isResizing = false;
-
-logResizer.addEventListener('mousedown', () => {
-  isResizing = true;
-  document.addEventListener('mousemove', handleResize);
-  document.addEventListener('mouseup', stopResize);
-});
-
-function handleResize(e) {
-  if (!isResizing) return;
-
-  const mainRect = document.querySelector('.main').getBoundingClientRect();
-  const newHeight = mainRect.bottom - e.clientY;
-
-  const minHeight = 120;
-  const maxHeight = mainRect.height * 0.4;  // limit to 40%
-
-  if (newHeight >= minHeight && newHeight <= maxHeight) {
-    logContainer.style.height = newHeight + 'px';
-    drawChart();
-  }
-}
-
-function stopResize() {
-  isResizing = false;
-  document.removeEventListener('mousemove', handleResize);
-  document.removeEventListener('mouseup', stopResize);
-}
-
 // ── Chart ─────────────────────────────────────────────────────────────────────
 const cvs = document.getElementById('chart');
 const ctx = cvs.getContext('2d');
@@ -1562,7 +1760,7 @@ new ResizeObserver(drawChart).observe(document.querySelector('.chart-box'));
 
 // ── App controller ─────────────────────────────────────────────────────────────
 const app = (() => {
-  let connected = false, running = false, canExport = false;
+  let connected = false, running = false, canExport = false, canAnalyze = false, canDownloadExcel = false, analysisRunning = false;
 
   // ── Theme Management ──
   function initTheme() {
@@ -1600,21 +1798,7 @@ const app = (() => {
   document.getElementById('themeToggle').addEventListener('click', toggleTheme);
 
   function log(msg, cls = '') {
-    const b = document.getElementById('logBody');
-    const e = document.createElement('div');
-    e.className = 'log-entry ' + cls;
-    const t = new Date().toLocaleTimeString('en', { hour12: false });
-    e.textContent = t + '  ' + msg;
-    b.appendChild(e);
-    b.scrollTop = b.scrollHeight;
-    // Animate in
-    e.style.opacity = '0';
-    e.style.transform = 'translateX(-10px)';
-    setTimeout(() => {
-      e.style.transition = 'all 0.3s ease';
-      e.style.opacity = '1';
-      e.style.transform = 'translateX(0)';
-    }, 10);
+    toast(msg, cls);
   }
 
   function toast(msg, cls = '') {
@@ -1626,8 +1810,10 @@ const app = (() => {
   }
 
   function setStatus(state, label) {
-    document.getElementById('statusPill').className = 'pill ' + state;
-    document.getElementById('statusTxt').textContent = label;
+    const severity = state === 'done' ? 'success' : (state === 'connected' || state === 'running' ? 'info' : (state === 'error' ? 'err' : ''));
+    if (label) {
+      toast(label, severity);
+    }
   }
 
   function sync() {
@@ -1636,6 +1822,8 @@ const app = (() => {
     document.getElementById('btnStart').disabled  = !connected || running;
     document.getElementById('btnStop').disabled   = !running;
     document.getElementById('btnExport').disabled = !canExport;
+    document.getElementById('btnAnalyze').disabled = !canAnalyze || analysisRunning;
+    document.getElementById('btnDownloadExcel').disabled = !canDownloadExcel;
   }
 
   function setStats(blown, avgUs, maxUs, maxFrame) {
@@ -1665,7 +1853,7 @@ const app = (() => {
   async function toggleConnect() {
     if (connected) {
       await window.pywebview.api.disconnect();
-      connected = false; running = false; canExport = false;
+      connected = false; running = false; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
       setStatus('', 'Disconnected');
       log('Disconnected.', 'warn');
     } else {
@@ -1687,7 +1875,7 @@ const app = (() => {
   async function startAnalysis() {
     const r = JSON.parse(await window.pywebview.api.start_analysis());
     if (r.status === 'ok') {
-      running = true; canExport = false;
+      running = true; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
       latestChunk = null;
       setStats(0, 0, 0, 0); drawChart();
       setStatus('running', 'Running');
@@ -1703,6 +1891,8 @@ const app = (() => {
     running = false;
     if (r.status === 'ok') {
       canExport = true;
+      canAnalyze = true;
+      canDownloadExcel = false;
       setStatus('done', 'Complete');
       toast(r.message, 'success');
       log(r.message + (r.ack_received ? ' (ACK received)' : ' (ACK timeout)'), 'ok');
@@ -1733,22 +1923,70 @@ const app = (() => {
     latestChunk = data.frame_data;   // 500 percent values
     setStats(data.blown, data.avg_us, data.max_us, data.max_frame);
     drawChart();
-    log(`s${data.second}: blown=${data.blown}, avg=${data.avg_us}µs, max=${data.max_us}µs @ frame ${data.max_frame}`, 'info');
   }
 
   function onError(msg) {
-    running = false; setStatus('', 'Error');
+    running = false; analysisRunning = false; setStatus('error', 'Error');
     log('Serial error: ' + msg, 'err'); sync();
+  }
+
+  async function analyze() {
+    if (analysisRunning) return;
+    const r = JSON.parse(await window.pywebview.api.analyze());
+    if (r.status === 'ok') {
+      analysisRunning = true;
+      canDownloadExcel = false;
+      toast(r.message, 'info');
+      sync();
+    } else {
+      toast(r.message, 'err');
+    }
+  }
+
+  async function downloadExcel() {
+    const r = JSON.parse(await window.pywebview.api.download_excel());
+    if (r.status === 'ok') {
+      toast(`Excel downloaded → ${r.path}`, 'success');
+    } else if (r.status === 'cancelled') {
+      toast(r.message, 'warn');
+    } else {
+      toast(r.message, 'err');
+    }
+  }
+
+  function onAnalysisComplete(payload) {
+    analysisRunning = false;
+    canDownloadExcel = true;
+    sync();
+    showAnalysisModal(payload && payload.message ? payload.message : 'Patterns Analyzed Successfully');
+  }
+
+  function onAnalysisError(msg) {
+    analysisRunning = false;
+    canDownloadExcel = false;
+    toast(msg, 'err');
+    sync();
+  }
+
+  function showAnalysisModal(message) {
+    const modal = document.getElementById('analysisModal');
+    const modalMessage = document.getElementById('analysisModalMessage');
+    modalMessage.textContent = message;
+    modal.classList.add('show');
+  }
+
+  function closeAnalysisModal() {
+    document.getElementById('analysisModal').classList.remove('show');
   }
 
   window.addEventListener('pywebviewready', () => {
     initTheme();
     refreshPorts();
-    log('Tool ready. Select a port and connect.', 'info');
+    toast('Tool ready. Select a port and connect.', 'info');
     drawChart();
   });
 
-  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError };
+  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, downloadExcel, onAnalysisComplete, onAnalysisError, closeAnalysisModal };
 })();
 
 window._app = app;
