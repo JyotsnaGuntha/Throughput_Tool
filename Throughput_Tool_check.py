@@ -634,6 +634,50 @@ body.light-theme .theme-toggle:hover {
   color: var(--blue-light);
 }
 
+.top-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+.top-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+
+.top-status.connected {
+  color: var(--green-light);
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.top-status.connected .top-status-dot {
+  background: var(--green-light);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+
+.top-status.disconnected {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+body.light-theme .top-status {
+  background: #f9fafb;
+}
+
 
 /* Layout */
 .layout { 
@@ -1482,7 +1526,11 @@ body.light-theme .modal-message {
       <span class="brand-sub">Serial Monitor &amp; Frame Inspector</span>
     </div>
   </div>
-  <div style="display: flex; align-items: center; gap: 16px;">
+  <div style="display: flex; align-items: center; gap: 12px;">
+    <div class="top-status disconnected" id="usbStatus">
+      <span class="top-status-dot" id="usbStatusDot"></span>
+      <span id="usbStatusText">Disconnected</span>
+    </div>
     <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme">
       <svg class="theme-icon" id="sunIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="5"></circle>
@@ -1761,6 +1809,7 @@ new ResizeObserver(drawChart).observe(document.querySelector('.chart-box'));
 // ── App controller ─────────────────────────────────────────────────────────────
 const app = (() => {
   let connected = false, running = false, canExport = false, canAnalyze = false, canDownloadExcel = false, analysisRunning = false;
+  let lastUsbConnected = null;
 
   // ── Theme Management ──
   function initTheme() {
@@ -1816,6 +1865,19 @@ const app = (() => {
     }
   }
 
+  function updateUsbStatus(isConnected) {
+    if (lastUsbConnected === isConnected) {
+      return;
+    }
+
+    lastUsbConnected = isConnected;
+    const status = document.getElementById('usbStatus');
+    const text = document.getElementById('usbStatusText');
+    text.textContent = isConnected ? 'Connected' : 'Disconnected';
+    status.classList.toggle('connected', isConnected);
+    status.classList.toggle('disconnected', !isConnected);
+  }
+
   function sync() {
     const btn = document.getElementById('btnConn');
     btn.title = connected ? 'Disconnect from port' : 'Connect to port';
@@ -1854,6 +1916,7 @@ const app = (() => {
     if (connected) {
       await window.pywebview.api.disconnect();
       connected = false; running = false; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
+      updateUsbStatus(false);
       setStatus('', 'Disconnected');
       log('Disconnected.', 'warn');
     } else {
@@ -1863,9 +1926,11 @@ const app = (() => {
       const r = JSON.parse(await window.pywebview.api.connect(port, baud));
       if (r.status === 'ok') {
         connected = true;
+        updateUsbStatus(true);
         setStatus('connected', 'Connected');
         log(r.message, 'ok');
       } else {
+        updateUsbStatus(false);
         log('Failed: ' + r.message, 'err');
       }
     }
