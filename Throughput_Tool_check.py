@@ -27,6 +27,12 @@ from datetime import datetime
 import serial
 import serial.tools.list_ports
 import webview
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 # ─────────────────────────────────────────────
 #  Protocol constants
@@ -207,6 +213,247 @@ class Api:
             return json.dumps({"status": "ok", "path": filepath})
         except Exception as exc:
             return json.dumps({"status": "error", "message": str(exc)})
+
+    def download_pdf(self) -> str:
+        if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
+            return json.dumps({"status": "error", "message": "No analyzed data available for PDF report."})
+
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"throughput_{ts}_Analysis_Report.pdf"
+            result = window.create_file_dialog(
+                webview.FileDialog.SAVE,
+                save_filename=default_name,
+                file_types=["PDF Files (*.pdf)", "All files (*.*)"]
+            )
+
+            if not result:
+                return json.dumps({"status": "cancelled", "message": "Download cancelled."})
+
+            pdf_path = result if isinstance(result, str) else result[0]
+            self._generate_pdf_report(pdf_path)
+            return json.dumps({"status": "ok", "path": pdf_path})
+        except Exception as exc:
+            return json.dumps({"status": "error", "message": str(exc)})
+
+    def _generate_pdf_report(self, output_path: str) -> None:
+        """Generate a professional PDF report of the throughput analysis."""
+        doc = SimpleDocTemplate(output_path, pagesize=letter, topMargin=0.75*inch, bottomMargin=0.75*inch)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#2563eb'),
+            spaceAfter=6,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#1f2937'),
+            spaceAfter=10,
+            spaceBefore=12,
+            fontName='Helvetica-Bold',
+            borderColor=colors.HexColor('#d1d5db'),
+            borderWidth=0.5,
+            borderPadding=8
+        )
+
+        # Report title and metadata
+        story.append(Paragraph("Throughput Analysis Report", title_style))
+        story.append(Spacer(1, 0.2*inch))
+
+        # Report info
+        gen_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        info_data = [
+            ["Report Generated:", gen_time],
+            ["Device Type:", "Serial Throughput Analyzer"],
+            ["Analysis Tool:", "Throughput Analysis Monitoring System v1.0"],
+        ]
+        info_table = Table(info_data, colWidths=[2.2*inch, 3.8*inch])
+        info_table.setStyle(TableStyle([
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#6b7280')),
+            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#111827')),
+            ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.HexColor('#f9fafb'), colors.white]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        story.append(info_table)
+        story.append(Spacer(1, 0.3*inch))
+
+        # Session Summary
+        story.append(Paragraph("Session Summary", heading_style))
+        summary = self._build_summary()
+        summary_data = [
+            ["Metric", "Value"],
+            ["Total Records Analyzed", f"{summary['rows']:,}"],
+            ["Session Duration", f"{summary['seconds']} seconds"],
+            ["Average Latency", f"{summary['avg_us']} µs"],
+            ["Maximum Latency", f"{summary['max_us']} µs"],
+            ["Peak Frame Index", f"Frame {summary['max_frame']}"],
+            ["Frames Exceeding Threshold (>2000µs)", f"{summary['blown']:,}"],
+        ]
+        summary_table = Table(summary_data, colWidths=[2.8*inch, 3.2*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563eb')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 11),
+            ('FONT', (0, 1), (-1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 1), (0, -1), colors.HexColor('#6b7280')),
+            ('TEXTCOLOR', (1, 1), (1, -1), colors.HexColor('#111827')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#f9fafb'), colors.white]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d1d5db')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ]))
+        story.append(summary_table)
+        story.append(Spacer(1, 0.3*inch))
+
+        # Key Performance Metrics
+        story.append(Paragraph("Key Performance Metrics", heading_style))
+        metrics_data = [
+            ["Metric", "Value", "Status"],
+            ["Average Response Time", f"{summary['avg_us']} µs", "✓ Measured"],
+            ["Maximum Response Time", f"{summary['max_us']} µs", "✓ Measured"],
+            ["Blown Frames Count", f"{summary['blown']}", "⚠ Alert Threshold: 2000µs"],
+            ["Performance Index", f"{self._calculate_performance_index(summary)}%", "✓ Calculated"],
+        ]
+        metrics_table = Table(metrics_data, colWidths=[2.0*inch, 1.8*inch, 2.2*inch])
+        metrics_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#059669')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 1), (0, -1), colors.HexColor('#6b7280')),
+            ('TEXTCOLOR', (1, 1), (1, -1), colors.HexColor('#111827')),
+            ('TEXTCOLOR', (2, 1), (2, -1), colors.HexColor('#059669')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#f0fdf4'), colors.white]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d1d5db')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 9),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+        ]))
+        story.append(metrics_table)
+        story.append(Spacer(1, 0.3*inch))
+
+        # Analysis Insights
+        story.append(Paragraph("Analysis Insights & Observations", heading_style))
+        insights = self._generate_insights(summary)
+        for insight in insights:
+            story.append(Paragraph(f"• {insight}", ParagraphStyle('Insight', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#374151'), spaceAfter=6, leftIndent=20)))
+        story.append(Spacer(1, 0.2*inch))
+
+        # Recommendations
+        story.append(Paragraph("Recommendations", heading_style))
+        recommendations = self._generate_recommendations(summary)
+        for rec in recommendations:
+            story.append(Paragraph(f"• {rec}", ParagraphStyle('Rec', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#374151'), spaceAfter=6, leftIndent=20)))
+        story.append(Spacer(1, 0.2*inch))
+
+        # Data Characteristics
+        story.append(Paragraph("Data Characteristics", heading_style))
+        characteristics_data = [
+            ["Total Samples Collected", f"{summary['rows']:,}"],
+            ["Session Time Span", f"{summary['seconds']} seconds"],
+            ["Sampling Rate", f"~{summary['rows'] // max(summary['seconds'], 1)} samples/sec"],
+            ["Data Quality", "Complete"],
+        ]
+        char_table = Table(characteristics_data, colWidths=[2.5*inch, 3.5*inch])
+        char_table.setStyle(TableStyle([
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#6b7280')),
+            ('TEXTCOLOR', (1, 0), (1, -1), colors.HexColor('#111827')),
+            ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.HexColor('#f9fafb'), colors.white]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 7),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+        ]))
+        story.append(char_table)
+        story.append(Spacer(1, 0.3*inch))
+
+        # Conclusion
+        story.append(Paragraph("Conclusion", heading_style))
+        conclusion = self._generate_conclusion(summary)
+        story.append(Paragraph(conclusion, styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+
+        # Footer
+        footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#9ca3af'), alignment=TA_CENTER)
+        story.append(Paragraph("This report was automatically generated by the Throughput Analysis Tool.", footer_style))
+
+        doc.build(story)
+
+    def _calculate_performance_index(self, summary: dict) -> int:
+        """Calculate a performance index (0-100) based on analysis metrics."""
+        if summary['rows'] == 0:
+            return 0
+        # Performance inversely proportional to blown frames
+        blown_ratio = summary['blown'] / max(summary['rows'], 1)
+        performance = int(max(0, 100 - (blown_ratio * 100)))
+        return performance
+
+    def _generate_insights(self, summary: dict) -> list[str]:
+        """Generate insights based on analysis data."""
+        insights = []
+        if summary['rows'] > 0:
+            insights.append(f"Analyzed {summary['rows']:,} data points over {summary['seconds']} seconds of operation.")
+            if summary['blown'] == 0:
+                insights.append("All frame response times remained within the acceptable threshold (<2000µs).")
+            else:
+                blown_pct = (summary['blown'] / summary['rows']) * 100
+                insights.append(f"{blown_pct:.2f}% of frames exceeded the 2000µs performance threshold.")
+            if summary['avg_us'] < 500:
+                insights.append("Average response time is excellent, indicating optimal system performance.")
+            elif summary['avg_us'] < 1000:
+                insights.append("Average response time is good with normal operational parameters.")
+            else:
+                insights.append("Average response time shows moderate latency; monitoring recommended.")
+        return insights
+
+    def _generate_recommendations(self, summary: dict) -> list[str]:
+        """Generate recommendations based on analysis results."""
+        recommendations = []
+        if summary['blown'] > 0:
+            recommendations.append("Investigate and optimize processes that caused frame delays exceeding the 2000µs threshold.")
+            recommendations.append("Consider adjusting scheduler priorities or reducing concurrent workloads.")
+        if summary['avg_us'] > 1500:
+            recommendations.append("Review system resource utilization and background processes for potential optimization.")
+        if summary['max_us'] > 3000:
+            recommendations.append("The maximum latency spike indicates a potential bottleneck; prioritize performance profiling.")
+        if not recommendations:
+            recommendations.append("Current performance metrics are within acceptable ranges. Continue regular monitoring.")
+        return recommendations
+
+    def _generate_conclusion(self, summary: dict) -> str:
+        """Generate a professional conclusion statement."""
+        perf_index = self._calculate_performance_index(summary)
+        if perf_index >= 95:
+            return f"Overall Performance: Excellent ({perf_index}%). All systems are operating within optimal parameters with minimal frame delays. No immediate action required."
+        elif perf_index >= 80:
+            return f"Overall Performance: Good ({perf_index}%). System performance is satisfactory with occasional frame delays. Continue standard monitoring practices."
+        elif perf_index >= 60:
+            return f"Overall Performance: Fair ({perf_index}%). Noticeable frame delays detected. Review recommendations and implement optimization strategies."
+        else:
+            return f"Overall Performance: Poor ({perf_index}%). Significant performance degradation observed. Immediate investigation and remediation recommended."
 
     def get_ports(self) -> str:
         ports = serial.tools.list_ports.comports()
@@ -1011,18 +1258,27 @@ select:focus, input[type=text]:focus {
 body.light-theme select,
 body.light-theme input[type=text] {
   background: #f3f4f6;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%234b5563' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
   border-color: #d1d5db;
   color: #111827;
 }
 
 body.light-theme select:hover,
 body.light-theme input[type=text]:hover {
-  background: #e5e7eb;
+  background-color: #e5e7eb;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%234b5563' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
   border-color: #9ca3af;
 }
 
 body.light-theme select:focus,
 body.light-theme input[type=text]:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%234b5563' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
@@ -1476,6 +1732,238 @@ body.light-theme .modal-message {
   color: #111827;
 }
 
+body.light-theme .modal-close {
+  background: linear-gradient(135deg, #2563eb 0%, #059669 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+body.light-theme .modal-close:hover {
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.3);
+}
+
+/* Light theme button styles */
+body.light-theme .btn-action {
+  border: 1px solid transparent;
+}
+
+body.light-theme .btn-action.start {
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.2);
+}
+
+body.light-theme .btn-action.start:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(5, 150, 105, 0.3);
+}
+
+body.light-theme .btn-action.stop {
+  background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.2);
+}
+
+body.light-theme .btn-action.stop:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3);
+}
+
+body.light-theme .btn-action.export {
+  background: linear-gradient(135deg, #7c3aed 0%, #0891b2 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);
+}
+
+body.light-theme .btn-action.export:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.3);
+}
+
+body.light-theme .btn-action.analyze {
+  background: linear-gradient(135deg, #d97706 0%, #2563eb 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.2);
+}
+
+body.light-theme .btn-action.analyze:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(217, 119, 6, 0.3);
+}
+
+body.light-theme .btn-action.download {
+  background: linear-gradient(135deg, #059669 0%, #2563eb 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.2);
+}
+
+body.light-theme .btn-action.download:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(5, 150, 105, 0.3);
+}
+
+body.light-theme .btn {
+  transition: all .2s ease;
+}
+
+body.light-theme .btn-blue {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+}
+
+body.light-theme .btn-blue:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3);
+}
+
+body.light-theme .btn-ghost {
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #d1d5db;
+}
+
+body.light-theme .btn-ghost:not(:disabled):hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+  color: #111827;
+}
+
+body.light-theme .btn-green {
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  color: #ffffff;
+  border-color: #059669;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.2);
+}
+
+body.light-theme .btn-green:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(5, 150, 105, 0.3);
+}
+
+body.light-theme .btn-red {
+  background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+  color: #ffffff;
+  border-color: #dc2626;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.2);
+}
+
+body.light-theme .btn-red:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3);
+}
+
+body.light-theme .btn-purple {
+  background: linear-gradient(135deg, #7c3aed 0%, #0891b2 100%);
+  color: #ffffff;
+  border-color: #7c3aed;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);
+}
+
+body.light-theme .btn-purple:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.3);
+}
+
+/* Light theme pill styles */
+body.light-theme .pill {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  color: #374151;
+}
+
+body.light-theme .pill.connected {
+  border-color: #10b981;
+  color: #059669;
+  background: rgba(5, 150, 105, 0.08);
+}
+
+body.light-theme .pill.connected .pill-dot {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+}
+
+body.light-theme .pill.running {
+  border-color: #3b82f6;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+body.light-theme .pill.running .pill-dot {
+  background: #3b82f6;
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
+}
+
+body.light-theme .pill.done {
+  border-color: #f59e0b;
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.08);
+}
+
+body.light-theme .pill.done .pill-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.2);
+}
+
+/* Light theme status styles */
+body.light-theme .top-status.disconnected {
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.3);
+  background: rgba(220, 38, 38, 0.08);
+}
+
+body.light-theme .top-status.disconnected .top-status-dot {
+  background: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+/* Light theme chart area */
+body.light-theme .chart-hdr {
+  color: #111827;
+}
+
+body.light-theme .chart-ttl {
+  color: #111827;
+  font-weight: 700;
+}
+
+body.light-theme .leg-item {
+  color: #6b7280;
+}
+
+/* Light theme log area */
+body.light-theme .log-hdr {
+  color: #6b7280;
+  border-bottom-color: #d1d5db;
+}
+
+body.light-theme .log-body {
+  background: #ffffff;
+}
+
+/* Light theme for scard hover */
+body.light-theme .scard:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+}
+
+/* Light theme scrollbar */
+body.light-theme ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+body.light-theme ::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 6px;
+}
+
+body.light-theme ::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Light theme hr divider */
+body.light-theme .hr {
+  background: linear-gradient(90deg, transparent, #d1d5db, transparent);
+}
+
+/* Light theme modal backdrop */
+body.light-theme .modal-backdrop {
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+}
+
 ::-webkit-scrollbar { 
   width: 6px; 
 }
@@ -1637,14 +2125,18 @@ body.light-theme .modal-message {
         </button>
       </div>
       <div class="hr"></div>
-      <div class="ctrl-row buttons" style="grid-template-columns: 1fr 1fr;">
+      <div class="ctrl-row buttons" style="grid-template-columns: 1fr 1fr 1fr;">
         <button class="btn-action analyze" id="btnAnalyze" onclick="app.analyze()" title="Run Analysis" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v2H3zm0 4h10v2H3zm0 4h7v2H3z"/></svg>
           Analyze
         </button>
         <button class="btn-action download" id="btnDownloadExcel" onclick="app.downloadExcel()" title="Download Excel" disabled>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><path d="M3 14h10"/></svg>
-          Download Excel
+          Excel
+        </button>
+        <button class="btn-action download" id="btnDownloadPdf" onclick="app.downloadPdf()" title="Download PDF" disabled>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><path d="M3 14h10"/></svg>
+          PDF
         </button>
       </div>
     </div>
