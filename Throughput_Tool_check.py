@@ -489,10 +489,7 @@ body.light-theme .theme-toggle:hover {
   height: 18px;
   transition: all 0.3s ease;
 }
-.theme-icon[style*="display: none"] {
-  opacity: 0;
-  transform: rotate(-180deg);
-}
+
 .theme-toggle:hover .theme-icon:not([style*="display: none"]) {
   color: var(--blue-light);
 }
@@ -508,7 +505,7 @@ body.light-theme .theme-toggle:hover {
 
 /* Right Control Panel */
 .control-panel {
-  width: 320px;
+  width: 300px;
   flex-shrink: 0;
   background: var(--surface);
   border-left: 1px solid var(--border);
@@ -1594,13 +1591,9 @@ const app = (() => {
   function updateThemeIcons(isDark) {
     const sunIcon = document.getElementById('sunIcon');
     const moonIcon = document.getElementById('moonIcon');
-    if (isDark) {
-      sunIcon.style.display = 'block';
-      moonIcon.style.display = 'none';
-    } else {
-      sunIcon.style.display = 'none';
-      moonIcon.style.display = 'block';
-    }
+
+    sunIcon.style.display = isDark ? 'block' : 'none';
+    moonIcon.style.display = isDark ? 'none' : 'block';
   }
 
   // Attach theme toggle listener
