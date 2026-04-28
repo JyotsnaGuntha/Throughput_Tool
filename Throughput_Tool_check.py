@@ -1946,6 +1946,23 @@ body.light-theme .metric-table td:first-child {
   color: #111827;
 }
 
+.sort-header {
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 10px;
+  border-radius: 4px;
+  transition: background 0.2s ease;
+  white-space: nowrap;
+}
+
+.sort-header:hover {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+body.light-theme .sort-header:hover {
+  background: rgba(37, 99, 235, 0.12);
+}
+
 .metric-formula {
   background: rgba(0, 0, 0, 0.2);
   padding: 10px;
@@ -2516,7 +2533,11 @@ body.light-theme .modal-backdrop {
       <div class="metric-detail-label" id="blownFramesCountLabel">All Blown Frames</div>
       <table class="metric-table">
         <thead>
-          <tr><th>Rank</th><th>Frame #</th><th>Time (µs)</th></tr>
+          <tr>
+            <th class="sort-header" id="blownSortRankHeader" onclick="app.sortBlownFrames('rank')">Rank</th>
+            <th class="sort-header" id="blownSortFrameHeader" onclick="app.sortBlownFrames('frameIndex')">Frame #</th>
+            <th class="sort-header" id="blownSortTimeHeader" onclick="app.sortBlownFrames('timeUs')">Time (µs)</th>
+          </tr>
         </thead>
         <tbody id="blownFramesList"></tbody>
       </table>
@@ -2574,7 +2595,12 @@ body.light-theme .modal-backdrop {
       <div class="metric-detail-label">Top 10 Highest Processing Times</div>
       <table class="metric-table">
         <thead>
-          <tr><th>Rank</th><th>Frame #</th><th>Time (µs)</th><th>Timestamp (s)</th></tr>
+          <tr>
+            <th class="sort-header" id="maxSortRankHeader" onclick="app.sortMaxFrames('rank')">Rank</th>
+            <th class="sort-header" id="maxSortFrameHeader" onclick="app.sortMaxFrames('frameIndex')">Frame #</th>
+            <th class="sort-header" id="maxSortTimeHeader" onclick="app.sortMaxFrames('timeUs')">Time (µs)</th>
+            <th class="sort-header" id="maxSortTimestampHeader" onclick="app.sortMaxFrames('timestamp')">Timestamp (s)</th>
+          </tr>
         </thead>
         <tbody id="maxFramesList"></tbody>
       </table>
@@ -2791,6 +2817,7 @@ const app = (() => {
     totalTime: 0,
     frameCount: 0,
     blownFrames: [],
+    maxFrames: [],
     allFrames: []
   };
   const THRESHOLD_US = 2000;
@@ -2898,6 +2925,7 @@ const app = (() => {
         timeUs: pct * SCALE_FACTOR,
         isBlown: (pct * SCALE_FACTOR) > THRESHOLD_US
       }));
+      metricData.maxFrames = [];
       
       // Get blown frames sorted by time (descending)
       metricData.blownFrames = metricData.allFrames
@@ -3187,22 +3215,74 @@ const app = (() => {
     // Update label to show total count
     document.getElementById('blownFramesCountLabel').textContent = `All ${totalBlown.toLocaleString()} Blown Frame${totalBlown !== 1 ? 's' : ''}`;
     
-    // Generate ALL blown frames (sorted by time, descending)
+    // Initialize filter state if not exists
+    if (!window.blownFilterState) {
+      window.blownFilterState = {
+        sortBy: 'timeUs',
+        sortAsc: false
+      };
+    }
+    
+    renderBlownFramesTable();
+  }
+
+  function renderBlownFramesTable() {
+    const state = window.blownFilterState;
+    let filtered = [...metricData.blownFrames];
+    
+    // Sort based on current state
+    filtered.sort((a, b) => {
+      let aVal, bVal;
+      
+      if (state.sortBy === 'timeUs') {
+        aVal = a.timeUs;
+        bVal = b.timeUs;
+      } else if (state.sortBy === 'frameIndex') {
+        aVal = a.frameIndex;
+        bVal = b.frameIndex;
+      } else {
+        // rank - use index in original array
+        aVal = metricData.blownFrames.indexOf(a) + 1;
+        bVal = metricData.blownFrames.indexOf(b) + 1;
+      }
+      
+      return state.sortAsc ? aVal - bVal : bVal - aVal;
+    });
+    
+    // Render table rows
     const tbody = document.getElementById('blownFramesList');
     tbody.innerHTML = '';
     
-    const sortedBlown = metricData.blownFrames
-      .sort((a, b) => b.timeUs - a.timeUs);
-    
-    sortedBlown.forEach((frame, idx) => {
+    filtered.forEach((frame, idx) => {
       const tr = document.createElement('tr');
+      const rank = metricData.blownFrames.indexOf(frame) + 1;
       tr.innerHTML = `
-        <td>${idx + 1}</td>
+        <td>${rank}</td>
         <td>${frame.frameIndex}</td>
         <td>${frame.timeUs.toLocaleString()}</td>
       `;
       tbody.appendChild(tr);
     });
+  }
+
+  function sortBlownFrames(column) {
+    if (!window.blownFilterState) {
+      window.blownFilterState = {
+        sortBy: 'timeUs',
+        sortAsc: false
+      };
+    }
+    
+    // If clicking the same column, toggle sort direction
+    if (window.blownFilterState.sortBy === column) {
+      window.blownFilterState.sortAsc = !window.blownFilterState.sortAsc;
+    } else {
+      // If clicking a different column, sort descending by default
+      window.blownFilterState.sortBy = column;
+      window.blownFilterState.sortAsc = false;
+    }
+    
+    renderBlownFramesTable();
   }
 
   function populateAvgTimeModal() {
@@ -3233,26 +3313,80 @@ const app = (() => {
       : 'Within threshold';
     
     document.getElementById('maxFrameIndex').textContent = metricData.maxFrame;
-    
-    // Generate top 10 highest times
+
+    if (!window.maxFilterState) {
+      window.maxFilterState = {
+        sortBy: 'timeUs',
+        sortAsc: false
+      };
+    }
+
+    if (!metricData.maxFrames || metricData.maxFrames.length === 0) {
+      metricData.maxFrames = [...metricData.allFrames]
+        .sort((a, b) => b.timeUs - a.timeUs)
+        .slice(0, 10);
+    }
+
+    renderMaxFramesTable();
+  }
+
+  function renderMaxFramesTable() {
+    const state = window.maxFilterState;
+    let filtered = [...metricData.maxFrames];
+
+    filtered.sort((a, b) => {
+      let aVal, bVal;
+
+      if (state.sortBy === 'timeUs') {
+        aVal = a.timeUs;
+        bVal = b.timeUs;
+      } else if (state.sortBy === 'frameIndex') {
+        aVal = a.frameIndex;
+        bVal = b.frameIndex;
+      } else if (state.sortBy === 'timestamp') {
+        aVal = a.frameIndex / 500;
+        bVal = b.frameIndex / 500;
+      } else {
+        aVal = metricData.maxFrames.indexOf(a) + 1;
+        bVal = metricData.maxFrames.indexOf(b) + 1;
+      }
+
+      return state.sortAsc ? aVal - bVal : bVal - aVal;
+    });
+
     const tbody = document.getElementById('maxFramesList');
     tbody.innerHTML = '';
-    
-    const topFrames = metricData.allFrames
-      .sort((a, b) => b.timeUs - a.timeUs)
-      .slice(0, 10);
-    
-    topFrames.forEach((frame, idx) => {
+
+    filtered.forEach((frame) => {
       const tr = document.createElement('tr');
-      const timestamp = (frame.frameIndex / 500).toFixed(2); // Approximate timestamp
+      const rank = metricData.maxFrames.indexOf(frame) + 1;
+      const timestamp = (frame.frameIndex / 500).toFixed(2);
       tr.innerHTML = `
-        <td>${idx + 1}</td>
+        <td>${rank}</td>
         <td>${frame.frameIndex}</td>
         <td>${frame.timeUs.toLocaleString()}</td>
         <td>${timestamp}s</td>
       `;
       tbody.appendChild(tr);
     });
+  }
+
+  function sortMaxFrames(column) {
+    if (!window.maxFilterState) {
+      window.maxFilterState = {
+        sortBy: 'timeUs',
+        sortAsc: false
+      };
+    }
+
+    if (window.maxFilterState.sortBy === column) {
+      window.maxFilterState.sortAsc = !window.maxFilterState.sortAsc;
+    } else {
+      window.maxFilterState.sortBy = column;
+      window.maxFilterState.sortAsc = false;
+    }
+
+    renderMaxFramesTable();
   }
 
   function populatePeakFrameModal() {
