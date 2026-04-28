@@ -1687,6 +1687,7 @@ body.light-theme #toast {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
   padding: 24px;
   text-align: center;
+  position: relative;
 }
 .modal-title {
   font-size: 12px;
@@ -1961,48 +1962,6 @@ body.light-theme .metric-formula {
   color: #059669;
 }
 
-.metric-modal-footer {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-body.light-theme .metric-modal-footer {
-  border-top-color: #e5e7eb;
-}
-
-.modal-btn-close {
-  border: none;
-  border-radius: 10px;
-  height: 38px;
-  padding: 0 18px;
-  min-width: 90px;
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 12px;
-  color: #fff;
-  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-light) 100%);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
-  transition: all 0.2s ease;
-}
-
-.modal-btn-close:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.35);
-}
-
-body.light-theme .modal-btn-close {
-  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
-}
-
-body.light-theme .modal-btn-close:hover {
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.25);
-}
-
 /* Close button for metric modals */
 .metric-modal-close-btn {
   position: absolute;
@@ -2040,6 +1999,41 @@ body.light-theme .metric-modal-close-btn {
 
 body.light-theme .metric-modal-close-btn:hover {
   background: rgba(37, 99, 235, 0.15);
+}
+
+/* Focus Styles for Accessibility */
+.modal-close:focus,
+.metric-modal-close-btn:focus {
+  outline: 2px solid var(--blue-light);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+body.light-theme .modal-close:focus,
+body.light-theme .metric-modal-close-btn:focus {
+  outline: 2px solid #2563eb;
+}
+
+/* Visible focus indicator for all focusable elements within modals */
+.modal-card:focus-within,
+.metric-modal-card:focus-within {
+  box-shadow: inset 0 0 0 1px var(--blue-light);
+}
+
+body.light-theme .modal-card:focus-within,
+body.light-theme .metric-modal-card:focus-within {
+  box-shadow: inset 0 0 0 1px #2563eb;
+}
+
+/* Enhanced button focus states */
+button:focus-visible {
+  outline: 2px solid var(--blue-light);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+body.light-theme button:focus-visible {
+  outline: 2px solid #2563eb;
 }
 
 /* Make stat cards clickable */
@@ -2491,18 +2485,18 @@ body.light-theme .modal-backdrop {
 </div>
 
 <div id="toast"></div>
-<div class="modal-backdrop" id="analysisModal">
-  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
+<div class="modal-backdrop" id="analysisModal" role="presentation">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle" aria-hidden="true">
+    <button class="metric-modal-close-btn" onclick="app.closeAnalysisModal()" aria-label="Close analysis modal">×</button>
     <div class="modal-title" id="analysisModalTitle">Analysis Complete</div>
     <div class="modal-message" id="analysisModalMessage">Patterns Analyzed Successfully</div>
-    <button class="modal-close" type="button" onclick="app.closeAnalysisModal()">OK</button>
   </div>
 </div>
 
 <!-- Metric Detail Modals -->
-<div class="modal-backdrop" id="frameBlownModal">
-  <div class="metric-modal-card" role="dialog" aria-modal="true">
-    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('frameBlownModal')" aria-label="Close">×</button>
+<div class="modal-backdrop" id="frameBlownModal" role="presentation">
+  <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="blownModalTitle" aria-hidden="true">
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('frameBlownModal')" aria-label="Close Frames Blown details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">⚠️</div>
       <div>
@@ -2527,19 +2521,16 @@ body.light-theme .modal-backdrop {
         <tbody id="blownFramesList"></tbody>
       </table>
     </div>
-    <div class="metric-modal-footer">
-      <button class="modal-btn-close" onclick="app.closeMetricModal('frameBlownModal')">Close</button>
-    </div>
   </div>
 </div>
 
-<div class="modal-backdrop" id="avgTimeModal">
-  <div class="metric-modal-card" role="dialog" aria-modal="true">
-    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('avgTimeModal')" aria-label="Close">×</button>
+<div class="modal-backdrop" id="avgTimeModal" role="presentation">
+  <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="avgTimeModalTitle" aria-hidden="true">
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('avgTimeModal')" aria-label="Close Average Time details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">📊</div>
       <div>
-        <div class="metric-modal-title">Average Time</div>
+        <div class="metric-modal-title" id="avgTimeModalTitle">Average Time</div>
         <div class="metric-modal-subtitle">Mean Processing Latency</div>
       </div>
     </div>
@@ -2562,19 +2553,16 @@ body.light-theme .modal-backdrop {
       <div class="metric-detail-label">Interpretation</div>
       <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;" id="avgInterpretation">—</div>
     </div>
-    <div class="metric-modal-footer">
-      <button class="modal-btn-close" onclick="app.closeMetricModal('avgTimeModal')">Close</button>
-    </div>
   </div>
 </div>
 
-<div class="modal-backdrop" id="maxTimeModal">
-  <div class="metric-modal-card" role="dialog" aria-modal="true">
-    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('maxTimeModal')" aria-label="Close">×</button>
+<div class="modal-backdrop" id="maxTimeModal" role="presentation">
+  <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="maxTimeModalTitle" aria-hidden="true">
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('maxTimeModal')" aria-label="Close Maximum Time details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">⏱️</div>
       <div>
-        <div class="metric-modal-title">Maximum Time</div>
+        <div class="metric-modal-title" id="maxTimeModalTitle">Maximum Time</div>
         <div class="metric-modal-subtitle">Peak Processing Latency</div>
       </div>
     </div>
@@ -2602,19 +2590,16 @@ body.light-theme .modal-backdrop {
         <span class="metric-detail-row-value" id="maxFrameIndex">—</span>
       </div>
     </div>
-    <div class="metric-modal-footer">
-      <button class="modal-btn-close" onclick="app.closeMetricModal('maxTimeModal')">Close</button>
-    </div>
   </div>
 </div>
 
-<div class="modal-backdrop" id="peakFrameModal">
-  <div class="metric-modal-card" role="dialog" aria-modal="true">
-    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('peakFrameModal')" aria-label="Close">×</button>
+<div class="modal-backdrop" id="peakFrameModal" role="presentation">
+  <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="peakFrameModalTitle" aria-hidden="true">
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('peakFrameModal')" aria-label="Close Peak Frame details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">🎯</div>
       <div>
-        <div class="metric-modal-title">Peak Frame</div>
+        <div class="metric-modal-title" id="peakFrameModalTitle">Peak Frame</div>
         <div class="metric-modal-subtitle">Maximum Latency Frame Details</div>
       </div>
     </div>
@@ -2639,10 +2624,10 @@ body.light-theme .modal-backdrop {
     </div>
     <div class="metric-detail-section">
       <div class="metric-detail-label">Explanation</div>
-      <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;">This frame has the highest recorded processing latency in the entire session. It represents the worst-case scenario for system performance.</div>
-    </div>
-    <div class="metric-modal-footer">
-      <button class="modal-btn-close" onclick="app.closeMetricModal('peakFrameModal')">Close</button>
+      <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;">
+        This frame has the highest recorded processing latency in the entire session. 
+        It represents the worst-case scenario for system performance.
+      </div>
     </div>
   </div>
 </div>
@@ -3061,20 +3046,101 @@ const app = (() => {
 
   function showAnalysisModal(message) {
     const modal = document.getElementById('analysisModal');
+    previousFocusedElement = document.activeElement;
+    currentOpenModal = modal;
     const modalMessage = document.getElementById('analysisModalMessage');
     modalMessage.textContent = message;
     modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
+    trapFocus(modal);
   }
 
   function closeAnalysisModal() {
-    document.getElementById('analysisModal').classList.remove('show');
+    const modal = document.getElementById('analysisModal');
+    modal.classList.remove('show');
+    modal.setAttribute('aria-hidden', 'true');
+    releaseFocus(modal);
+    currentOpenModal = null;
+    // Restore focus to the previously focused element
+    if (previousFocusedElement && document.body.contains(previousFocusedElement)) {
+      setTimeout(() => previousFocusedElement.focus(), 100);
+    }
   }
 
-  // ── Metric Modal Functions ──
+  // ── Modal Management & Focus Trap ──
+  let currentOpenModal = null;
+  let previousFocusedElement = null;
+
+  function getFocusableElements(container) {
+    const focusableSelectors = [
+      'button',
+      '[href]',
+      'input',
+      'select',
+      'textarea',
+      '[tabindex]:not([tabindex="-1"])'
+    ];
+    return Array.from(container.querySelectorAll(focusableSelectors.join(',')))
+      .filter(el => !el.hasAttribute('disabled') && el.offsetParent !== null);
+  }
+
+  function trapFocus(modalBackdrop) {
+    const focusableElements = getFocusableElements(modalBackdrop);
+    if (focusableElements.length === 0) return;
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    modalBackdrop._handleKeydown = (e) => {
+      if (e.key !== 'Tab') return;
+
+      if (e.shiftKey) {
+        // Shift + Tab
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        }
+      } else {
+        // Tab
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    };
+
+    modalBackdrop.addEventListener('keydown', modalBackdrop._handleKeydown);
+    setTimeout(() => firstElement.focus(), 50);
+  }
+
+  function releaseFocus(modalBackdrop) {
+    if (modalBackdrop._handleKeydown) {
+      modalBackdrop.removeEventListener('keydown', modalBackdrop._handleKeydown);
+    }
+  }
+
+  function handleGlobalKeyboard(e) {
+    // ESC to close any open modal
+    if (e.key === 'Escape' && currentOpenModal) {
+      const modalId = currentOpenModal.id;
+      
+      if (modalId === 'analysisModal') {
+        closeAnalysisModal();
+      } else if (modalId.endsWith('Modal')) {
+        closeMetricModal(modalId);
+      }
+    }
+  }
+
+  // ── Metric Modal Functions with Focus Management ──
   function openMetricModal(modalId) {
     const modal = document.getElementById(modalId);
     if (!modal) return;
     
+    // Store the previously focused element
+    previousFocusedElement = document.activeElement;
+    currentOpenModal = modal;
+
     // Populate modal content based on modal type
     if (modalId === 'frameBlownModal') {
       populateBlownFramesModal();
@@ -3087,12 +3153,24 @@ const app = (() => {
     }
     
     modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
+    
+    // Trap focus within the modal
+    trapFocus(modal);
   }
 
   function closeMetricModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.remove('show');
+      modal.setAttribute('aria-hidden', 'true');
+      releaseFocus(modal);
+      currentOpenModal = null;
+      
+      // Restore focus to the previously focused element
+      if (previousFocusedElement && document.body.contains(previousFocusedElement)) {
+        setTimeout(() => previousFocusedElement.focus(), 100);
+      }
     }
   }
 
@@ -3197,6 +3275,9 @@ const app = (() => {
     refreshPorts();
     toast('Tool ready. Select a port and connect.', 'info');
     drawChart();
+    
+    // Add global keyboard event listener for accessibility
+    document.addEventListener('keydown', handleGlobalKeyboard);
   });
 
   return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, downloadExcel, onAnalysisComplete, onAnalysisError, closeAnalysisModal, openMetricModal, closeMetricModal };
