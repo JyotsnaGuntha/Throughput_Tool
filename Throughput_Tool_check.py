@@ -1742,6 +1742,324 @@ body.light-theme .modal-close:hover {
   box-shadow: 0 6px 20px rgba(37, 99, 235, 0.3);
 }
 
+/* Metric Detail Modal Styles */
+.metric-modal-card {
+  width: min(640px, 95%);
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-dark) 100%);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  padding: 28px;
+  text-align: left;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+body.light-theme .metric-modal-card {
+  background: #ffffff;
+  border-color: #d1d5db;
+}
+
+.metric-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--border);
+}
+
+body.light-theme .metric-modal-header {
+  border-bottom-color: #e5e7eb;
+}
+
+.metric-modal-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--blue-light);
+}
+
+.metric-modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+body.light-theme .metric-modal-title {
+  color: #111827;
+}
+
+.metric-modal-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+.metric-detail-section {
+  margin-bottom: 18px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border);
+}
+
+body.light-theme .metric-detail-section {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+
+.metric-detail-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+
+.metric-detail-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+body.light-theme .metric-detail-value {
+  color: #111827;
+}
+
+.metric-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+body.light-theme .metric-detail-row {
+  border-bottom-color: #e5e7eb;
+}
+
+.metric-detail-row:last-child {
+  border-bottom: none;
+}
+
+.metric-detail-row-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.metric-detail-row-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+body.light-theme .metric-detail-row-value {
+  color: #111827;
+}
+
+.metric-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.metric-table th {
+  background: rgba(59, 130, 246, 0.08);
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--blue-light);
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+body.light-theme .metric-table th {
+  background: #eff6ff;
+  color: #2563eb;
+  border-bottom-color: #dbeafe;
+}
+
+.metric-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+body.light-theme .metric-table td {
+  border-bottom-color: #f3f4f6;
+  color: #374151;
+}
+
+.metric-table td:first-child {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+body.light-theme .metric-table td:first-child {
+  color: #111827;
+}
+
+.metric-formula {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 10px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--green-light);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+body.light-theme .metric-formula {
+  background: #f0fdf4;
+  color: #059669;
+}
+
+.metric-modal-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+body.light-theme .metric-modal-footer {
+  border-top-color: #e5e7eb;
+}
+
+.modal-btn-close {
+  border: none;
+  border-radius: 10px;
+  height: 38px;
+  padding: 0 18px;
+  min-width: 90px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-light) 100%);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
+  transition: all 0.2s ease;
+}
+
+.modal-btn-close:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.35);
+}
+
+body.light-theme .modal-btn-close {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+}
+
+body.light-theme .modal-btn-close:hover {
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.25);
+}
+
+/* Close button for metric modals */
+.metric-modal-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 0;
+  line-height: 1;
+}
+
+.metric-modal-close-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  transform: scale(1.05);
+}
+
+.metric-modal-close-btn:active {
+  transform: scale(0.95);
+}
+
+body.light-theme .metric-modal-close-btn {
+  background: rgba(37, 99, 235, 0.08);
+  color: #111827;
+}
+
+body.light-theme .metric-modal-close-btn:hover {
+  background: rgba(37, 99, 235, 0.15);
+}
+
+/* Make stat cards clickable */
+.scard {
+  cursor: pointer;
+}
+
+.scard.clickable {
+  position: relative;
+}
+
+.scard.clickable::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-top: 8px solid transparent;
+  border-right: 8px solid var(--border-lt);
+  border-bottom: 8px solid var(--border-lt);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.scard.clickable:hover::after {
+  opacity: 0.5;
+}
+
+/* Light theme scrollbar for metric modal */
+body.light-theme .metric-modal-card::-webkit-scrollbar {
+  width: 6px;
+}
+
+body.light-theme .metric-modal-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+body.light-theme .metric-modal-card::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+body.light-theme .metric-modal-card::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
 /* Light theme button styles */
 body.light-theme .btn-action {
   border: 1px solid transparent;
@@ -2042,21 +2360,21 @@ body.light-theme .modal-backdrop {
 
   <div class="main">
     <div class="stats">
-      <div class="scard">
+      <div class="scard clickable" id="cardFrameBlown" onclick="app.openMetricModal('frameBlownModal')">
         <div class="scard-lbl">Frames Blown</div>
         <div class="scard-val c-red" id="svBlown">—</div>
       </div>
-      <div class="scard">
+      <div class="scard clickable" id="cardAvgTime" onclick="app.openMetricModal('avgTimeModal')">
         <div class="scard-lbl">Average Time</div>
         <div class="scard-val c-green" id="svAvg">—</div>
         <div class="scard-unit">microseconds</div>
       </div>
-      <div class="scard">
+      <div class="scard clickable" id="cardMaxTime" onclick="app.openMetricModal('maxTimeModal')">
         <div class="scard-lbl">Maximum Time</div>
         <div class="scard-val c-amber" id="svMaxTime">—</div>
         <div class="scard-unit">microseconds</div>
       </div>
-      <div class="scard">
+      <div class="scard clickable" id="cardPeakFrame" onclick="app.openMetricModal('peakFrameModal')">
         <div class="scard-lbl">Peak Frame</div>
         <div class="scard-val c-blue" id="svMaxFrame">—</div>
       </div>
@@ -2150,6 +2468,162 @@ body.light-theme .modal-backdrop {
     <div class="modal-title" id="analysisModalTitle">Analysis Complete</div>
     <div class="modal-message" id="analysisModalMessage">Patterns Analyzed Successfully</div>
     <button class="modal-close" type="button" onclick="app.closeAnalysisModal()">OK</button>
+  </div>
+</div>
+
+<!-- Metric Detail Modals -->
+<div class="modal-backdrop" id="frameBlownModal">
+  <div class="metric-modal-card" role="dialog" aria-modal="true">
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('frameBlownModal')" aria-label="Close">×</button>
+    <div class="metric-modal-header">
+      <div class="metric-modal-icon">⚠️</div>
+      <div>
+        <div class="metric-modal-title">Frames Blown</div>
+        <div class="metric-modal-subtitle">Threshold Exceedance Analysis</div>
+      </div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Total Blown Frames</div>
+      <div class="metric-detail-value" id="blownTotal">—</div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Percentage of Total Frames</div>
+      <div class="metric-detail-value" id="blownPercent">—</div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Definition</div>
+      <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;">Frames with processing time exceeding 2000 microseconds</div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Top 10 Blown Frames</div>
+      <table class="metric-table">
+        <thead>
+          <tr><th>Rank</th><th>Frame #</th><th>Time (µs)</th></tr>
+        </thead>
+        <tbody id="blownFramesList"></tbody>
+      </table>
+    </div>
+    <div class="metric-modal-footer">
+      <button class="modal-btn-close" onclick="app.closeMetricModal('frameBlownModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="avgTimeModal">
+  <div class="metric-modal-card" role="dialog" aria-modal="true">
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('avgTimeModal')" aria-label="Close">×</button>
+    <div class="metric-modal-header">
+      <div class="metric-modal-icon">📊</div>
+      <div>
+        <div class="metric-modal-title">Average Time</div>
+        <div class="metric-modal-subtitle">Mean Processing Latency</div>
+      </div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Average Value</div>
+      <div class="metric-detail-value" id="avgValue">—</div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Calculation Details</div>
+      <div class="metric-detail-row">
+        <span class="metric-detail-row-label">Total Accumulated Time</span>
+        <span class="metric-detail-row-value" id="avgTotalTime">—</span>
+      </div>
+      <div class="metric-detail-row">
+        <span class="metric-detail-row-label">Number of Frames</span>
+        <span class="metric-detail-row-value" id="avgFrameCount">—</span>
+      </div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Formula</div>
+      <div class="metric-formula">Average = Total Accumulated Time ÷ Number of Frames</div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Interpretation</div>
+      <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;" id="avgInterpretation">—</div>
+    </div>
+    <div class="metric-modal-footer">
+      <button class="modal-btn-close" onclick="app.closeMetricModal('avgTimeModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="maxTimeModal">
+  <div class="metric-modal-card" role="dialog" aria-modal="true">
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('maxTimeModal')" aria-label="Close">×</button>
+    <div class="metric-modal-header">
+      <div class="metric-modal-icon">⏱️</div>
+      <div>
+        <div class="metric-modal-title">Maximum Time</div>
+        <div class="metric-modal-subtitle">Peak Processing Latency</div>
+      </div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Peak Value</div>
+      <div class="metric-detail-value" id="maxValue">—</div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Top 10 Highest Processing Times</div>
+      <table class="metric-table">
+        <thead>
+          <tr><th>Rank</th><th>Frame #</th><th>Time (µs)</th><th>Timestamp (s)</th></tr>
+        </thead>
+        <tbody id="maxFramesList"></tbody>
+      </table>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Analysis</div>
+      <div class="metric-detail-row">
+        <span class="metric-detail-row-label">Exceeds Threshold by</span>
+        <span class="metric-detail-row-value" id="maxExceedance">—</span>
+      </div>
+      <div class="metric-detail-row">
+        <span class="metric-detail-row-label">Peak Frame Index</span>
+        <span class="metric-detail-row-value" id="maxFrameIndex">—</span>
+      </div>
+    </div>
+    <div class="metric-modal-footer">
+      <button class="modal-btn-close" onclick="app.closeMetricModal('maxTimeModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="peakFrameModal">
+  <div class="metric-modal-card" role="dialog" aria-modal="true">
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('peakFrameModal')" aria-label="Close">×</button>
+    <div class="metric-modal-header">
+      <div class="metric-modal-icon">🎯</div>
+      <div>
+        <div class="metric-modal-title">Peak Frame</div>
+        <div class="metric-modal-subtitle">Maximum Latency Frame Details</div>
+      </div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Peak Frame Index</div>
+      <div class="metric-detail-value" id="peakFrameNum">—</div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Peak Processing Time</div>
+      <div class="metric-detail-value" id="peakFrameTime">—</div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Status</div>
+      <div class="metric-detail-row">
+        <span class="metric-detail-row-label">Exceeds Threshold</span>
+        <span class="metric-detail-row-value" id="peakFrameStatus">—</span>
+      </div>
+      <div class="metric-detail-row">
+        <span class="metric-detail-row-label">Exceedance Margin</span>
+        <span class="metric-detail-row-value" id="peakFrameExceed">—</span>
+      </div>
+    </div>
+    <div class="metric-detail-section">
+      <div class="metric-detail-label">Explanation</div>
+      <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;">This frame has the highest recorded processing latency in the entire session. It represents the worst-case scenario for system performance.</div>
+    </div>
+    <div class="metric-modal-footer">
+      <button class="modal-btn-close" onclick="app.closeMetricModal('peakFrameModal')">Close</button>
+    </div>
   </div>
 </div>
 
@@ -2302,6 +2776,20 @@ new ResizeObserver(drawChart).observe(document.querySelector('.chart-box'));
 const app = (() => {
   let connected = false, running = false, canExport = false, canAnalyze = false, canDownloadExcel = false, analysisRunning = false;
   let lastUsbConnected = null;
+  
+  // ── Metric Data Storage ──
+  let metricData = {
+    blown: 0,
+    avgUs: 0,
+    maxUs: 0,
+    maxFrame: 0,
+    totalTime: 0,
+    frameCount: 0,
+    blownFrames: [],
+    allFrames: []
+  };
+  const THRESHOLD_US = 2000;
+  const SCALE_FACTOR = 20;
 
   // ── Theme Management ──
   function initTheme() {
@@ -2381,10 +2869,36 @@ const app = (() => {
   }
 
   function setStats(blown, avgUs, maxUs, maxFrame) {
+    // Update UI
     document.getElementById('svBlown').textContent    = blown    != null ? Number(blown).toLocaleString()   : '—';
     document.getElementById('svAvg').textContent      = avgUs    != null ? Number(avgUs).toLocaleString()   : '—';
     document.getElementById('svMaxTime').textContent  = maxUs    != null ? Number(maxUs).toLocaleString()   : '—';
     document.getElementById('svMaxFrame').textContent = maxFrame != null ? Number(maxFrame).toLocaleString() : '—';
+    
+    // Store metric data
+    metricData.blown = blown || 0;
+    metricData.avgUs = avgUs || 0;
+    metricData.maxUs = maxUs || 0;
+    metricData.maxFrame = maxFrame || 0;
+    
+    // Calculate total time and frame count
+    if (latestChunk && Array.isArray(latestChunk)) {
+      metricData.frameCount = latestChunk.length;
+      metricData.totalTime = (metricData.avgUs * metricData.frameCount);
+      
+      // Build frames array with actual times
+      metricData.allFrames = latestChunk.map((pct, idx) => ({
+        frameIndex: idx,
+        percentValue: pct,
+        timeUs: pct * SCALE_FACTOR,
+        isBlown: (pct * SCALE_FACTOR) > THRESHOLD_US
+      }));
+      
+      // Get blown frames sorted by time (descending)
+      metricData.blownFrames = metricData.allFrames
+        .filter(f => f.isBlown)
+        .sort((a, b) => b.timeUs - a.timeUs);
+    }
   }
 
   async function refreshPorts() {
@@ -2536,6 +3050,120 @@ const app = (() => {
     document.getElementById('analysisModal').classList.remove('show');
   }
 
+  // ── Metric Modal Functions ──
+  function openMetricModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    
+    // Populate modal content based on modal type
+    if (modalId === 'frameBlownModal') {
+      populateBlownFramesModal();
+    } else if (modalId === 'avgTimeModal') {
+      populateAvgTimeModal();
+    } else if (modalId === 'maxTimeModal') {
+      populateMaxTimeModal();
+    } else if (modalId === 'peakFrameModal') {
+      populatePeakFrameModal();
+    }
+    
+    modal.classList.add('show');
+  }
+
+  function closeMetricModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      modal.classList.remove('show');
+    }
+  }
+
+  function populateBlownFramesModal() {
+    document.getElementById('blownTotal').textContent = metricData.blown.toLocaleString();
+    const blownPercent = metricData.frameCount > 0 
+      ? ((metricData.blown / metricData.frameCount) * 100).toFixed(2)
+      : '0.00';
+    document.getElementById('blownPercent').textContent = `${blownPercent}%`;
+    
+    // Generate top 10 blown frames
+    const tbody = document.getElementById('blownFramesList');
+    tbody.innerHTML = '';
+    
+    const topBlown = metricData.blownFrames.slice(0, 10);
+    topBlown.forEach((frame, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${idx + 1}</td>
+        <td>${frame.frameIndex}</td>
+        <td>${frame.timeUs.toLocaleString()}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function populateAvgTimeModal() {
+    document.getElementById('avgValue').textContent = metricData.avgUs.toLocaleString() + ' µs';
+    document.getElementById('avgTotalTime').textContent = metricData.totalTime.toLocaleString() + ' µs';
+    document.getElementById('avgFrameCount').textContent = metricData.frameCount.toLocaleString();
+    
+    // Interpretation
+    let interpretation = '';
+    if (metricData.avgUs < 500) {
+      interpretation = 'Excellent: Average response time is very low, indicating optimal system performance.';
+    } else if (metricData.avgUs < 1000) {
+      interpretation = 'Good: Average response time is within acceptable range for normal operations.';
+    } else if (metricData.avgUs < 1500) {
+      interpretation = 'Acceptable: Average response time is moderate. Monitor for potential bottlenecks.';
+    } else {
+      interpretation = 'Concerning: Average response time is elevated. Consider optimizing system performance.';
+    }
+    document.getElementById('avgInterpretation').textContent = interpretation;
+  }
+
+  function populateMaxTimeModal() {
+    document.getElementById('maxValue').textContent = metricData.maxUs.toLocaleString() + ' µs';
+    
+    const exceedance = metricData.maxUs - THRESHOLD_US;
+    document.getElementById('maxExceedance').textContent = exceedance > 0 
+      ? `+${exceedance.toLocaleString()} µs (${(exceedance / THRESHOLD_US * 100).toFixed(1)}% over)`
+      : 'Within threshold';
+    
+    document.getElementById('maxFrameIndex').textContent = metricData.maxFrame;
+    
+    // Generate top 10 highest times
+    const tbody = document.getElementById('maxFramesList');
+    tbody.innerHTML = '';
+    
+    const topFrames = metricData.allFrames
+      .sort((a, b) => b.timeUs - a.timeUs)
+      .slice(0, 10);
+    
+    topFrames.forEach((frame, idx) => {
+      const tr = document.createElement('tr');
+      const timestamp = (frame.frameIndex / 500).toFixed(2); // Approximate timestamp
+      tr.innerHTML = `
+        <td>${idx + 1}</td>
+        <td>${frame.frameIndex}</td>
+        <td>${frame.timeUs.toLocaleString()}</td>
+        <td>${timestamp}s</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function populatePeakFrameModal() {
+    document.getElementById('peakFrameNum').textContent = `Frame ${metricData.maxFrame}`;
+    document.getElementById('peakFrameTime').textContent = metricData.maxUs.toLocaleString() + ' µs';
+    
+    const exceeds = metricData.maxUs > THRESHOLD_US;
+    document.getElementById('peakFrameStatus').textContent = exceeds ? '⚠️ Yes' : '✓ No';
+    
+    if (exceeds) {
+      const exceedance = metricData.maxUs - THRESHOLD_US;
+      document.getElementById('peakFrameExceed').textContent = `+${exceedance.toLocaleString()} µs`;
+    } else {
+      document.getElementById('peakFrameExceed').textContent = 'N/A';
+    }
+  }
+
   window.addEventListener('pywebviewready', () => {
     initTheme();
     refreshPorts();
@@ -2543,7 +3171,7 @@ const app = (() => {
     drawChart();
   });
 
-  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, downloadExcel, onAnalysisComplete, onAnalysisError, closeAnalysisModal };
+  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, downloadExcel, onAnalysisComplete, onAnalysisError, closeAnalysisModal, openMetricModal, closeMetricModal };
 })();
 
 window._app = app;
