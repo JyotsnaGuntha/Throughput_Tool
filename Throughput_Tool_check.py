@@ -2371,7 +2371,7 @@ body.light-theme .modal-backdrop {
 #analysisDetail .metric-modal-header {
   margin-bottom: 0;
   padding-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: none; /* removed divider */
 }
 
 body.light-theme #analysisDetail .metric-modal-card {
@@ -2381,7 +2381,7 @@ body.light-theme #analysisDetail .metric-modal-card {
 }
 
 body.light-theme #analysisDetail .metric-modal-header {
-  border-bottom-color: #e5e7eb;
+  border-bottom: none; /* removed divider for light theme */
 }
 
 #analysisDetail .metric-detail-section {
@@ -2416,6 +2416,26 @@ body.light-theme #analysisDetail .metric-detail-section {
 
 #analysisDetail .metric-modal-subtitle {
   font-size: 12px;
+}
+
+/* Two-column layout inside analysis detail: summary (left) and content/table (right) */
+#analysisDetail .metric-modal-content {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+#analysisDetail .metric-detail-column {
+  flex: 1 1 0;
+  min-width: 0;
+}
+#analysisDetail .metric-detail-column.right {
+  overflow: auto;
+}
+/* Stack columns on narrow screens */
+@media (max-width: 800px) {
+  #analysisDetail .metric-modal-content {
+    flex-direction: column;
+  }
 }
 </style>
 </head>
@@ -2515,32 +2535,37 @@ body.light-theme #analysisDetail .metric-detail-section {
       <div id="analysisDetail" style="display: none;">
         <!-- Inline Frames Blown detail -->
         <div class="metric-modal-card" id="inline_frameBlown" style="display:none;">
-          <div class="metric-modal-header">
-            <div class="metric-modal-icon">⚠️</div>
-            <div>
-              <div class="metric-modal-title" id="inline_blownModalTitle">Frames Blown</div>
-              <div class="metric-modal-subtitle">Threshold Exceedance Analysis</div>
+            <div class="metric-modal-header">
+              <div class="metric-modal-icon">⚠️</div>
+              <div>
+                <div class="metric-modal-title" id="inline_blownModalTitle">Frames Blown</div>
+                <div class="metric-modal-subtitle">Threshold Exceedance Analysis</div>
+              </div>
+            </div>
+            <div class="metric-modal-content">
+              <div class="metric-detail-column left">
+                <div class="metric-detail-section">
+                  <div class="metric-detail-label">Percentage of Total Frames</div>
+                  <div class="metric-detail-value" id="inline_blownPercent">—</div>
+                </div>
+              </div>
+              <div class="metric-detail-column right">
+                <div class="metric-detail-section">
+                  <div class="metric-detail-label" id="inline_blownFramesCountLabel">All Blown Frames</div>
+                  <table class="metric-table">
+                    <thead>
+                      <tr>
+                        <th>Rank</th>
+                        <th>Frame #</th>
+                        <th>Time (µs)</th>
+                      </tr>
+                    </thead>
+                    <tbody id="inline_blownFramesList"></tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Percentage of Total Frames</div>
-            <div class="metric-detail-value" id="inline_blownPercent">—</div>
-          </div>
-          
-          <div class="metric-detail-section">
-            <div class="metric-detail-label" id="inline_blownFramesCountLabel">All Blown Frames</div>
-            <table class="metric-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Frame #</th>
-                  <th>Time (µs)</th>
-                </tr>
-              </thead>
-              <tbody id="inline_blownFramesList"></tbody>
-            </table>
-          </div>
-        </div>
 
         <!-- Inline Average Time detail -->
         <div class="metric-modal-card" id="inline_avgTime" style="display:none;">
@@ -2551,24 +2576,30 @@ body.light-theme #analysisDetail .metric-detail-section {
               <div class="metric-modal-subtitle">Mean Processing Latency</div>
             </div>
           </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Average Value</div>
-            <div class="metric-detail-value" id="inline_avgValue">—</div>
-          </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Summary</div>
-            <div class="metric-detail-row">
-              <span class="metric-detail-row-label">Total Accumulated Time</span>
-              <span class="metric-detail-row-value" id="inline_avgTotalTime">—</span>
+          <div class="metric-modal-content">
+            <div class="metric-detail-column left">
+              <div class="metric-detail-section">
+                <div class="metric-detail-label">Average Value</div>
+                <div class="metric-detail-value" id="inline_avgValue">—</div>
+              </div>
+              <div class="metric-detail-section">
+                <div class="metric-detail-label">Interpretation</div>
+                <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;" id="inline_avgInterpretation">—</div>
+              </div>
             </div>
-            <div class="metric-detail-row">
-              <span class="metric-detail-row-label">Number of Frames</span>
-              <span class="metric-detail-row-value" id="inline_avgFrameCount">—</span>
+            <div class="metric-detail-column right">
+              <div class="metric-detail-section">
+                <div class="metric-detail-label">Summary</div>
+                <div class="metric-detail-row">
+                  <span class="metric-detail-row-label">Total Accumulated Time</span>
+                  <span class="metric-detail-row-value" id="inline_avgTotalTime">—</span>
+                </div>
+                <div class="metric-detail-row">
+                  <span class="metric-detail-row-label">Number of Frames</span>
+                  <span class="metric-detail-row-value" id="inline_avgFrameCount">—</span>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Interpretation</div>
-            <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;" id="inline_avgInterpretation">—</div>
           </div>
         </div>
 
@@ -2581,32 +2612,38 @@ body.light-theme #analysisDetail .metric-detail-section {
               <div class="metric-modal-subtitle">Peak Processing Latency</div>
             </div>
           </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Peak Value</div>
-            <div class="metric-detail-value" id="inline_maxValue">—</div>
-          </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Top 10 Highest Processing Times</div>
-            <table class="metric-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Frame #</th>
-                  <th>Time (µs)</th>
-                  <th>Timestamp (s)</th>
-                </tr>
-              </thead>
-              <tbody id="inline_maxFramesList"></tbody>
-            </table>
-          </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-row">
-              <span class="metric-detail-row-label">Exceeds Threshold by</span>
-              <span class="metric-detail-row-value" id="inline_maxExceedance">—</span>
+          <div class="metric-modal-content">
+            <div class="metric-detail-column left">
+              <div class="metric-detail-section">
+                <div class="metric-detail-label">Peak Value</div>
+                <div class="metric-detail-value" id="inline_maxValue">—</div>
+              </div>
+              <div class="metric-detail-section">
+                <div class="metric-detail-row">
+                  <span class="metric-detail-row-label">Exceeds Threshold by</span>
+                  <span class="metric-detail-row-value" id="inline_maxExceedance">—</span>
+                </div>
+                <div class="metric-detail-row">
+                  <span class="metric-detail-row-label">Peak Frame Index</span>
+                  <span class="metric-detail-row-value" id="inline_maxFrameIndex">—</span>
+                </div>
+              </div>
             </div>
-            <div class="metric-detail-row">
-              <span class="metric-detail-row-label">Peak Frame Index</span>
-              <span class="metric-detail-row-value" id="inline_maxFrameIndex">—</span>
+            <div class="metric-detail-column right">
+              <div class="metric-detail-section">
+                <div class="metric-detail-label">Top 10 Highest Processing Times</div>
+                <table class="metric-table">
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Frame #</th>
+                      <th>Time (µs)</th>
+                      <th>Timestamp (s)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inline_maxFramesList"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -2620,22 +2657,28 @@ body.light-theme #analysisDetail .metric-detail-section {
               <div class="metric-modal-subtitle">Maximum Latency Frame Details</div>
             </div>
           </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Peak Frame Index</div>
-            <div class="metric-detail-value" id="inline_peakFrameNum">—</div>
-          </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Peak Processing Time</div>
-            <div class="metric-detail-value" id="inline_peakFrameTime">—</div>
-          </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-row">
-              <span class="metric-detail-row-label">Exceeds Threshold</span>
-              <span class="metric-detail-row-value" id="inline_peakFrameStatus">—</span>
+          <div class="metric-modal-content">
+            <div class="metric-detail-column left">
+              <div class="metric-detail-section">
+                <div class="metric-detail-label">Peak Frame Index</div>
+                <div class="metric-detail-value" id="inline_peakFrameNum">—</div>
+              </div>
+              <div class="metric-detail-section">
+                <div class="metric-detail-label">Peak Processing Time</div>
+                <div class="metric-detail-value" id="inline_peakFrameTime">—</div>
+              </div>
             </div>
-            <div class="metric-detail-row">
-              <span class="metric-detail-row-label">Exceedance Margin</span>
-              <span class="metric-detail-row-value" id="inline_peakFrameExceed">—</span>
+            <div class="metric-detail-column right">
+              <div class="metric-detail-section">
+                <div class="metric-detail-row">
+                  <span class="metric-detail-row-label">Exceeds Threshold</span>
+                  <span class="metric-detail-row-value" id="inline_peakFrameStatus">—</span>
+                </div>
+                <div class="metric-detail-row">
+                  <span class="metric-detail-row-label">Exceedance Margin</span>
+                  <span class="metric-detail-row-value" id="inline_peakFrameExceed">—</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
