@@ -600,6 +600,14 @@ class Api:
 
     def get_summary(self) -> str:
       return json.dumps(self._build_summary())
+
+    def js_error(self, message: str) -> str:
+      # Receive JS errors from the webview for debugging
+      try:
+        print("[JS ERROR]", message)
+      except Exception:
+        pass
+      return json.dumps({"status": "ok"})
     
 # ─────────────────────────────────────────────
 #  Protocol
@@ -2335,6 +2343,26 @@ body.light-theme .modal-backdrop {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border);
 }
+
+/* Inline analysis detail should occupy the same area as the chart */
+#analysisDetail {
+  display: none; /* toggled by JS */
+  flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+#analysisDetail .metric-modal-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 16px;
+}
+
+#analysisDetail .metric-modal-header { margin-bottom: 12px; }
 </style>
 </head>
 <body>
@@ -2399,21 +2427,21 @@ body.light-theme .modal-backdrop {
 
   <div class="main">
     <div class="stats">
-      <div class="scard clickable" id="cardFrameBlown" onclick="app.openMetricModal('frameBlownModal')">
+      <div class="scard clickable" id="cardFrameBlown" onclick="app.toggleMetricView('frameBlown')">
         <div class="scard-lbl">Frames Blown</div>
         <div class="scard-val c-red" id="svBlown">—</div>
       </div>
-      <div class="scard clickable" id="cardAvgTime" onclick="app.openMetricModal('avgTimeModal')">
+      <div class="scard clickable" id="cardAvgTime" onclick="app.toggleMetricView('avgTime')">
         <div class="scard-lbl">Average Time</div>
         <div class="scard-val c-green" id="svAvg">—</div>
         <div class="scard-unit">microseconds</div>
       </div>
-      <div class="scard clickable" id="cardMaxTime" onclick="app.openMetricModal('maxTimeModal')">
+      <div class="scard clickable" id="cardMaxTime" onclick="app.toggleMetricView('maxTime')">
         <div class="scard-lbl">Maximum Time</div>
         <div class="scard-val c-amber" id="svMaxTime">—</div>
         <div class="scard-unit">microseconds</div>
       </div>
-      <div class="scard clickable" id="cardPeakFrame" onclick="app.openMetricModal('peakFrameModal')">
+      <div class="scard clickable" id="cardPeakFrame" onclick="app.toggleMetricView('peakFrame')">
         <div class="scard-lbl">Peak Frame</div>
         <div class="scard-val c-blue" id="svMaxFrame">—</div>
       </div>
@@ -2429,7 +2457,150 @@ body.light-theme .modal-backdrop {
           <div class="leg-item"><div class="leg-ln"></div>2000µs threshold</div>
         </div>
       </div>
-      <div class="chart-box"><canvas id="chart"></canvas></div>
+      <div id="chartView" class="chart-box"><canvas id="chart"></canvas></div>
+      <div id="analysisDetail" style="display: none;">
+        <!-- Inline Frames Blown detail -->
+        <div class="metric-modal-card" id="inline_frameBlown" style="display:none;">
+          <div style="display:flex;justify-content:flex-end;">
+            <button class="metric-modal-close-btn" onclick="app.toggleMetricView('frameBlown')">×</button>
+          </div>
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">⚠️</div>
+            <div>
+              <div class="metric-modal-title" id="inline_blownModalTitle">Frames Blown</div>
+              <div class="metric-modal-subtitle">Threshold Exceedance Analysis</div>
+            </div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Percentage of Total Frames</div>
+            <div class="metric-detail-value" id="inline_blownPercent">—</div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Definition</div>
+            <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;">Frames with processing time exceeding 2000 microseconds</div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label" id="inline_blownFramesCountLabel">All Blown Frames</div>
+            <table class="metric-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Time (µs)</th>
+                </tr>
+              </thead>
+              <tbody id="inline_blownFramesList"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Inline Average Time detail -->
+        <div class="metric-modal-card" id="inline_avgTime" style="display:none;">
+          <div style="display:flex;justify-content:flex-end;">
+            <button class="metric-modal-close-btn" onclick="app.toggleMetricView('avgTime')">×</button>
+          </div>
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">📊</div>
+            <div>
+              <div class="metric-modal-title" id="inline_avgTimeModalTitle">Average Time</div>
+              <div class="metric-modal-subtitle">Mean Processing Latency</div>
+            </div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Average Value</div>
+            <div class="metric-detail-value" id="inline_avgValue">—</div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Summary</div>
+            <div class="metric-detail-row">
+              <span class="metric-detail-row-label">Total Accumulated Time</span>
+              <span class="metric-detail-row-value" id="inline_avgTotalTime">—</span>
+            </div>
+            <div class="metric-detail-row">
+              <span class="metric-detail-row-label">Number of Frames</span>
+              <span class="metric-detail-row-value" id="inline_avgFrameCount">—</span>
+            </div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Interpretation</div>
+            <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;" id="inline_avgInterpretation">—</div>
+          </div>
+        </div>
+
+        <!-- Inline Max Time detail -->
+        <div class="metric-modal-card" id="inline_maxTime" style="display:none;">
+          <div style="display:flex;justify-content:flex-end;">
+            <button class="metric-modal-close-btn" onclick="app.toggleMetricView('maxTime')">×</button>
+          </div>
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">⏱️</div>
+            <div>
+              <div class="metric-modal-title" id="inline_maxTimeModalTitle">Maximum Time</div>
+              <div class="metric-modal-subtitle">Peak Processing Latency</div>
+            </div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Peak Value</div>
+            <div class="metric-detail-value" id="inline_maxValue">—</div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Top 10 Highest Processing Times</div>
+            <table class="metric-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Time (µs)</th>
+                  <th>Timestamp (s)</th>
+                </tr>
+              </thead>
+              <tbody id="inline_maxFramesList"></tbody>
+            </table>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-row">
+              <span class="metric-detail-row-label">Exceeds Threshold by</span>
+              <span class="metric-detail-row-value" id="inline_maxExceedance">—</span>
+            </div>
+            <div class="metric-detail-row">
+              <span class="metric-detail-row-label">Peak Frame Index</span>
+              <span class="metric-detail-row-value" id="inline_maxFrameIndex">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inline Peak Frame detail -->
+        <div class="metric-modal-card" id="inline_peakFrame" style="display:none;">
+          <div style="display:flex;justify-content:flex-end;">
+            <button class="metric-modal-close-btn" onclick="app.toggleMetricView('peakFrame')">×</button>
+          </div>
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">🎯</div>
+            <div>
+              <div class="metric-modal-title" id="inline_peakFrameModalTitle">Peak Frame</div>
+              <div class="metric-modal-subtitle">Maximum Latency Frame Details</div>
+            </div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Peak Frame Index</div>
+            <div class="metric-detail-value" id="inline_peakFrameNum">—</div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-label">Peak Processing Time</div>
+            <div class="metric-detail-value" id="inline_peakFrameTime">—</div>
+          </div>
+          <div class="metric-detail-section">
+            <div class="metric-detail-row">
+              <span class="metric-detail-row-label">Exceeds Threshold</span>
+              <span class="metric-detail-row-value" id="inline_peakFrameStatus">—</span>
+            </div>
+            <div class="metric-detail-row">
+              <span class="metric-detail-row-label">Exceedance Margin</span>
+              <span class="metric-detail-row-value" id="inline_peakFrameExceed">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2806,6 +2977,7 @@ new ResizeObserver(drawChart).observe(document.querySelector('.chart-box'));
 // ── App controller ─────────────────────────────────────────────────────────────
 const app = (() => {
   let connected = false, running = false, canExport = false, canAnalyze = false, canDownloadExcel = false, analysisRunning = false;
+  let currentMetricShown = null;
   let lastUsbConnected = null;
   
   // ── Metric Data Storage ──
@@ -3073,14 +3245,29 @@ const app = (() => {
   }
 
   function showAnalysisModal(message) {
-    const modal = document.getElementById('analysisModal');
-    previousFocusedElement = document.activeElement;
-    currentOpenModal = modal;
-    const modalMessage = document.getElementById('analysisModalMessage');
-    modalMessage.textContent = message;
-    modal.classList.add('show');
-    modal.setAttribute('aria-hidden', 'false');
-    trapFocus(modal);
+    // Instead of opening the floating modal, show the message inline in the Analysis View
+    const chartView = document.getElementById('chartView');
+    const analysisDetail = document.getElementById('analysisDetail');
+    chartView.style.display = 'none';
+    analysisDetail.style.display = 'flex';
+    // create or reuse a generic inline message container
+    let gen = document.getElementById('inline_generic');
+    if (!gen) {
+      gen = document.createElement('div');
+      gen.id = 'inline_generic';
+      gen.className = 'metric-modal-card';
+      gen.style.display = 'block';
+      const wrapper = document.getElementById('analysisDetail');
+      wrapper.insertBefore(gen, wrapper.firstChild);
+    }
+    gen.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;"><button class="metric-modal-close-btn" id="inline_generic_close">×</button></div>
+      <div class="metric-modal-header"><div class="metric-modal-icon">🔎</div><div><div class="metric-modal-title">Analysis</div><div class="metric-modal-subtitle">Message</div></div></div>
+      <div style="padding:8px 12px; font-size:16px; font-weight:600; color:var(--text-primary);">${message}</div>
+    `;
+    const closeBtn = document.getElementById('inline_generic_close');
+    if (closeBtn) closeBtn.onclick = () => { gen.style.display = 'none'; analysisDetail.style.display = 'none'; chartView.style.display = 'block'; currentMetricShown = null; };
+    currentMetricShown = 'inline_generic';
   }
 
   function closeAnalysisModal() {
@@ -3162,29 +3349,12 @@ const app = (() => {
 
   // ── Metric Modal Functions with Focus Management ──
   function openMetricModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (!modal) return;
-    
-    // Store the previously focused element
-    previousFocusedElement = document.activeElement;
-    currentOpenModal = modal;
-
-    // Populate modal content based on modal type
-    if (modalId === 'frameBlownModal') {
-      populateBlownFramesModal();
-    } else if (modalId === 'avgTimeModal') {
-      populateAvgTimeModal();
-    } else if (modalId === 'maxTimeModal') {
-      populateMaxTimeModal();
-    } else if (modalId === 'peakFrameModal') {
-      populatePeakFrameModal();
-    }
-    
-    modal.classList.add('show');
-    modal.setAttribute('aria-hidden', 'false');
-    
-    // Trap focus within the modal
-    trapFocus(modal);
+    // Map legacy modal ids to inline metric keys and show inline instead
+    if (modalId === 'frameBlownModal') return toggleMetricView('frameBlown');
+    if (modalId === 'avgTimeModal') return toggleMetricView('avgTime');
+    if (modalId === 'maxTimeModal') return toggleMetricView('maxTime');
+    if (modalId === 'peakFrameModal') return toggleMetricView('peakFrame');
+    // fallback: do nothing
   }
 
   function closeMetricModal(modalId) {
@@ -3199,6 +3369,48 @@ const app = (() => {
       if (previousFocusedElement && document.body.contains(previousFocusedElement)) {
         setTimeout(() => previousFocusedElement.focus(), 100);
       }
+    }
+  }
+
+  // Toggle metric view inside the Analysis View area (inline, not modal)
+  function toggleMetricView(metricKey) {
+    const chartView = document.getElementById('chartView');
+    const analysisDetail = document.getElementById('analysisDetail');
+
+    // If clicking the same metric again, toggle back to chart
+    if (currentMetricShown === metricKey) {
+      // hide inline
+      currentMetricShown = null;
+      // hide all inline metric containers
+      ['frameBlown','avgTime','maxTime','peakFrame'].forEach(k => {
+        const el = document.getElementById('inline_' + k);
+        if (el) el.style.display = 'none';
+      });
+      analysisDetail.style.display = 'none';
+      chartView.style.display = 'block';
+      return;
+    }
+
+    // Show selected metric
+    currentMetricShown = metricKey;
+    // hide chart
+    chartView.style.display = 'none';
+    analysisDetail.style.display = 'flex';
+    // Hide all then show selected
+    ['frameBlown','avgTime','maxTime','peakFrame'].forEach(k => {
+      const el = document.getElementById('inline_' + k);
+      if (el) el.style.display = (k === metricKey) ? 'block' : 'none';
+    });
+
+    // Populate the selected view
+    if (metricKey === 'frameBlown') {
+      populateBlownFramesModal();
+    } else if (metricKey === 'avgTime') {
+      populateAvgTimeModal();
+    } else if (metricKey === 'maxTime') {
+      populateMaxTimeModal();
+    } else if (metricKey === 'peakFrame') {
+      populatePeakFrameModal();
     }
   }
 
@@ -3224,6 +3436,9 @@ const app = (() => {
     }
     
     renderBlownFramesTable();
+
+    // Also render inline version if visible
+    renderBlownFramesTable(true);
   }
 
   function renderBlownFramesTable() {
@@ -3250,19 +3465,37 @@ const app = (() => {
     });
     
     // Render table rows
-    const tbody = document.getElementById('blownFramesList');
-    tbody.innerHTML = '';
-    
-    filtered.forEach((frame, idx) => {
-      const tr = document.createElement('tr');
-      const rank = metricData.blownFrames.indexOf(frame) + 1;
-      tr.innerHTML = `
-        <td>${rank}</td>
-        <td>${frame.frameIndex}</td>
-        <td>${frame.timeUs.toLocaleString()}</td>
-      `;
-      tbody.appendChild(tr);
-    });
+    // Render for modal
+    const modalTbody = document.getElementById('blownFramesList');
+    if (modalTbody) {
+      modalTbody.innerHTML = '';
+      filtered.forEach((frame, idx) => {
+        const tr = document.createElement('tr');
+        const rank = metricData.blownFrames.indexOf(frame) + 1;
+        tr.innerHTML = `
+          <td>${rank}</td>
+          <td>${frame.frameIndex}</td>
+          <td>${frame.timeUs.toLocaleString()}</td>
+        `;
+        modalTbody.appendChild(tr);
+      });
+    }
+
+    // Render inline version if present
+    const inlineTbody = document.getElementById('inline_blownFramesList');
+    if (inlineTbody) {
+      inlineTbody.innerHTML = '';
+      filtered.forEach((frame, idx) => {
+        const tr = document.createElement('tr');
+        const rank = metricData.blownFrames.indexOf(frame) + 1;
+        tr.innerHTML = `
+          <td>${rank}</td>
+          <td>${frame.frameIndex}</td>
+          <td>${frame.timeUs.toLocaleString()}</td>
+        `;
+        inlineTbody.appendChild(tr);
+      });
+    }
   }
 
   function sortBlownFrames(column) {
@@ -3286,9 +3519,15 @@ const app = (() => {
   }
 
   function populateAvgTimeModal() {
-    document.getElementById('avgValue').textContent = metricData.avgUs.toLocaleString() + ' µs';
-    document.getElementById('avgTotalTime').textContent = metricData.totalTime.toLocaleString() + ' µs';
-    document.getElementById('avgFrameCount').textContent = metricData.frameCount.toLocaleString();
+    const avgVal = metricData.avgUs.toLocaleString() + ' µs';
+    const totalTime = metricData.totalTime.toLocaleString() + ' µs';
+    const frameCount = metricData.frameCount.toLocaleString();
+    if (document.getElementById('avgValue')) document.getElementById('avgValue').textContent = avgVal;
+    if (document.getElementById('avgTotalTime')) document.getElementById('avgTotalTime').textContent = totalTime;
+    if (document.getElementById('avgFrameCount')) document.getElementById('avgFrameCount').textContent = frameCount;
+    if (document.getElementById('inline_avgValue')) document.getElementById('inline_avgValue').textContent = avgVal;
+    if (document.getElementById('inline_avgTotalTime')) document.getElementById('inline_avgTotalTime').textContent = totalTime;
+    if (document.getElementById('inline_avgFrameCount')) document.getElementById('inline_avgFrameCount').textContent = frameCount;
     
     // Interpretation
     let interpretation = '';
@@ -3301,18 +3540,24 @@ const app = (() => {
     } else {
       interpretation = 'Concerning: Average response time is elevated. Consider optimizing system performance.';
     }
-    document.getElementById('avgInterpretation').textContent = interpretation;
+    if (document.getElementById('avgInterpretation')) document.getElementById('avgInterpretation').textContent = interpretation;
+    if (document.getElementById('inline_avgInterpretation')) document.getElementById('inline_avgInterpretation').textContent = interpretation;
   }
 
   function populateMaxTimeModal() {
-    document.getElementById('maxValue').textContent = metricData.maxUs.toLocaleString() + ' µs';
-    
+    const maxValText = metricData.maxUs.toLocaleString() + ' µs';
+    if (document.getElementById('maxValue')) document.getElementById('maxValue').textContent = maxValText;
+    if (document.getElementById('inline_maxValue')) document.getElementById('inline_maxValue').textContent = maxValText;
+
     const exceedance = metricData.maxUs - THRESHOLD_US;
-    document.getElementById('maxExceedance').textContent = exceedance > 0 
+    const exceedText = exceedance > 0 
       ? `+${exceedance.toLocaleString()} µs (${(exceedance / THRESHOLD_US * 100).toFixed(1)}% over)`
       : 'Within threshold';
-    
-    document.getElementById('maxFrameIndex').textContent = metricData.maxFrame;
+    if (document.getElementById('maxExceedance')) document.getElementById('maxExceedance').textContent = exceedText;
+    if (document.getElementById('inline_maxExceedance')) document.getElementById('inline_maxExceedance').textContent = exceedText;
+
+    if (document.getElementById('maxFrameIndex')) document.getElementById('maxFrameIndex').textContent = metricData.maxFrame;
+    if (document.getElementById('inline_maxFrameIndex')) document.getElementById('inline_maxFrameIndex').textContent = metricData.maxFrame;
 
     if (!window.maxFilterState) {
       window.maxFilterState = {
@@ -3326,7 +3571,6 @@ const app = (() => {
         .sort((a, b) => b.timeUs - a.timeUs)
         .slice(0, 10);
     }
-
     renderMaxFramesTable();
   }
 
@@ -3354,21 +3598,41 @@ const app = (() => {
       return state.sortAsc ? aVal - bVal : bVal - aVal;
     });
 
-    const tbody = document.getElementById('maxFramesList');
-    tbody.innerHTML = '';
+    // Modal table
+    const modalTbody = document.getElementById('maxFramesList');
+    if (modalTbody) {
+      modalTbody.innerHTML = '';
+      filtered.forEach((frame) => {
+        const tr = document.createElement('tr');
+        const rank = metricData.maxFrames.indexOf(frame) + 1;
+        const timestamp = (frame.frameIndex / 500).toFixed(2);
+        tr.innerHTML = `
+          <td>${rank}</td>
+          <td>${frame.frameIndex}</td>
+          <td>${frame.timeUs.toLocaleString()}</td>
+          <td>${timestamp}s</td>
+        `;
+        modalTbody.appendChild(tr);
+      });
+    }
 
-    filtered.forEach((frame) => {
-      const tr = document.createElement('tr');
-      const rank = metricData.maxFrames.indexOf(frame) + 1;
-      const timestamp = (frame.frameIndex / 500).toFixed(2);
-      tr.innerHTML = `
-        <td>${rank}</td>
-        <td>${frame.frameIndex}</td>
-        <td>${frame.timeUs.toLocaleString()}</td>
-        <td>${timestamp}s</td>
-      `;
-      tbody.appendChild(tr);
-    });
+    // Inline table
+    const inlineTbody = document.getElementById('inline_maxFramesList');
+    if (inlineTbody) {
+      inlineTbody.innerHTML = '';
+      filtered.forEach((frame) => {
+        const tr = document.createElement('tr');
+        const rank = metricData.maxFrames.indexOf(frame) + 1;
+        const timestamp = (frame.frameIndex / 500).toFixed(2);
+        tr.innerHTML = `
+          <td>${rank}</td>
+          <td>${frame.frameIndex}</td>
+          <td>${frame.timeUs.toLocaleString()}</td>
+          <td>${timestamp}s</td>
+        `;
+        inlineTbody.appendChild(tr);
+      });
+    }
   }
 
   function sortMaxFrames(column) {
@@ -3390,18 +3654,23 @@ const app = (() => {
   }
 
   function populatePeakFrameModal() {
-    document.getElementById('peakFrameNum').textContent = `Frame ${metricData.maxFrame}`;
-    document.getElementById('peakFrameTime').textContent = metricData.maxUs.toLocaleString() + ' µs';
-    
+    const peakNum = `Frame ${metricData.maxFrame}`;
+    const peakTime = metricData.maxUs.toLocaleString() + ' µs';
     const exceeds = metricData.maxUs > THRESHOLD_US;
-    document.getElementById('peakFrameStatus').textContent = exceeds ? '⚠️ Yes' : '✓ No';
-    
-    if (exceeds) {
-      const exceedance = metricData.maxUs - THRESHOLD_US;
-      document.getElementById('peakFrameExceed').textContent = `+${exceedance.toLocaleString()} µs`;
-    } else {
-      document.getElementById('peakFrameExceed').textContent = 'N/A';
-    }
+    const peakStatus = exceeds ? '⚠️ Yes' : '✓ No';
+    const peakExceed = exceeds ? `+${(metricData.maxUs - THRESHOLD_US).toLocaleString()} µs` : 'N/A';
+
+    if (document.getElementById('peakFrameNum')) document.getElementById('peakFrameNum').textContent = peakNum;
+    if (document.getElementById('inline_peakFrameNum')) document.getElementById('inline_peakFrameNum').textContent = peakNum;
+
+    if (document.getElementById('peakFrameTime')) document.getElementById('peakFrameTime').textContent = peakTime;
+    if (document.getElementById('inline_peakFrameTime')) document.getElementById('inline_peakFrameTime').textContent = peakTime;
+
+    if (document.getElementById('peakFrameStatus')) document.getElementById('peakFrameStatus').textContent = peakStatus;
+    if (document.getElementById('inline_peakFrameStatus')) document.getElementById('inline_peakFrameStatus').textContent = peakStatus;
+
+    if (document.getElementById('peakFrameExceed')) document.getElementById('peakFrameExceed').textContent = peakExceed;
+    if (document.getElementById('inline_peakFrameExceed')) document.getElementById('inline_peakFrameExceed').textContent = peakExceed;
   }
 
   window.addEventListener('pywebviewready', () => {
@@ -3414,7 +3683,7 @@ const app = (() => {
     document.addEventListener('keydown', handleGlobalKeyboard);
   });
 
-  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, downloadExcel, onAnalysisComplete, onAnalysisError, closeAnalysisModal, openMetricModal, closeMetricModal };
+  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, downloadExcel, onAnalysisComplete, onAnalysisError, closeAnalysisModal, openMetricModal, closeMetricModal, toggleMetricView };
 })();
 
 window._app = app;
@@ -3437,4 +3706,4 @@ window = webview.create_window(
 )
 
 if __name__ == "__main__":
-    webview.start(gui="edgechromium", debug=False)
+  webview.start(gui="edgechromium", debug=True)
