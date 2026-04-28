@@ -2349,20 +2349,74 @@ body.light-theme .modal-backdrop {
   display: none; /* toggled by JS */
   flex: 1;
   min-height: 0;
+  width: 100%;
   box-sizing: border-box;
 }
 
 #analysisDetail .metric-modal-card {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
   height: 100%;
+  margin: 0;
+  padding: 22px;
   overflow: auto;
-  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: linear-gradient(135deg, var(--surface) 0%, rgba(42, 50, 63, 0.75) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 30px rgba(0, 0, 0, 0.18);
 }
 
-#analysisDetail .metric-modal-header { margin-bottom: 12px; }
+#analysisDetail .metric-modal-header {
+  margin-bottom: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.light-theme #analysisDetail .metric-modal-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border-color: #dbe2ea;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+body.light-theme #analysisDetail .metric-modal-header {
+  border-bottom-color: #e5e7eb;
+}
+
+#analysisDetail .metric-detail-section {
+  margin-bottom: 0;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+body.light-theme #analysisDetail .metric-detail-section {
+  background: #f8fafc;
+  border-color: #e5e7eb;
+}
+
+#analysisDetail .metric-detail-value {
+  line-height: 1.45;
+}
+
+#analysisDetail .metric-table {
+  width: 100%;
+}
+
+#analysisDetail .metric-table td,
+#analysisDetail .metric-table th {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+#analysisDetail .metric-modal-title {
+  font-size: 20px;
+}
+
+#analysisDetail .metric-modal-subtitle {
+  font-size: 12px;
+}
 </style>
 </head>
 <body>
@@ -2461,9 +2515,6 @@ body.light-theme .modal-backdrop {
       <div id="analysisDetail" style="display: none;">
         <!-- Inline Frames Blown detail -->
         <div class="metric-modal-card" id="inline_frameBlown" style="display:none;">
-          <div style="display:flex;justify-content:flex-end;">
-            <button class="metric-modal-close-btn" onclick="app.toggleMetricView('frameBlown')">×</button>
-          </div>
           <div class="metric-modal-header">
             <div class="metric-modal-icon">⚠️</div>
             <div>
@@ -2475,10 +2526,7 @@ body.light-theme .modal-backdrop {
             <div class="metric-detail-label">Percentage of Total Frames</div>
             <div class="metric-detail-value" id="inline_blownPercent">—</div>
           </div>
-          <div class="metric-detail-section">
-            <div class="metric-detail-label">Definition</div>
-            <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;">Frames with processing time exceeding 2000 microseconds</div>
-          </div>
+          
           <div class="metric-detail-section">
             <div class="metric-detail-label" id="inline_blownFramesCountLabel">All Blown Frames</div>
             <table class="metric-table">
@@ -2496,9 +2544,6 @@ body.light-theme .modal-backdrop {
 
         <!-- Inline Average Time detail -->
         <div class="metric-modal-card" id="inline_avgTime" style="display:none;">
-          <div style="display:flex;justify-content:flex-end;">
-            <button class="metric-modal-close-btn" onclick="app.toggleMetricView('avgTime')">×</button>
-          </div>
           <div class="metric-modal-header">
             <div class="metric-modal-icon">📊</div>
             <div>
@@ -2529,9 +2574,6 @@ body.light-theme .modal-backdrop {
 
         <!-- Inline Max Time detail -->
         <div class="metric-modal-card" id="inline_maxTime" style="display:none;">
-          <div style="display:flex;justify-content:flex-end;">
-            <button class="metric-modal-close-btn" onclick="app.toggleMetricView('maxTime')">×</button>
-          </div>
           <div class="metric-modal-header">
             <div class="metric-modal-icon">⏱️</div>
             <div>
@@ -2571,9 +2613,6 @@ body.light-theme .modal-backdrop {
 
         <!-- Inline Peak Frame detail -->
         <div class="metric-modal-card" id="inline_peakFrame" style="display:none;">
-          <div style="display:flex;justify-content:flex-end;">
-            <button class="metric-modal-close-btn" onclick="app.toggleMetricView('peakFrame')">×</button>
-          </div>
           <div class="metric-modal-header">
             <div class="metric-modal-icon">🎯</div>
             <div>
@@ -2696,10 +2735,7 @@ body.light-theme .modal-backdrop {
       <div class="metric-detail-label">Percentage of Total Frames</div>
       <div class="metric-detail-value" id="blownPercent">—</div>
     </div>
-    <div class="metric-detail-section">
-      <div class="metric-detail-label">Definition</div>
-      <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;">Frames with processing time exceeding 2000 microseconds</div>
-    </div>
+    
     <div class="metric-detail-section">
       <div class="metric-detail-label" id="blownFramesCountLabel">All Blown Frames</div>
       <table class="metric-table">
@@ -3072,6 +3108,18 @@ const app = (() => {
     document.getElementById('btnDownloadExcel').disabled = !canDownloadExcel;
   }
 
+  function showChartView() {
+    const chartView = document.getElementById('chartView');
+    const analysisDetail = document.getElementById('analysisDetail');
+    chartView.style.display = 'block';
+    analysisDetail.style.display = 'none';
+    ['frameBlown','avgTime','maxTime','peakFrame','generic'].forEach(k => {
+      const el = document.getElementById(k === 'generic' ? 'inline_generic' : 'inline_' + k);
+      if (el) el.style.display = 'none';
+    });
+    currentMetricShown = null;
+  }
+
   function setStats(blown, avgUs, maxUs, maxFrame) {
     // Update UI
     document.getElementById('svBlown').textContent    = blown    != null ? Number(blown).toLocaleString()   : '—';
@@ -3153,6 +3201,7 @@ const app = (() => {
     if (r.status === 'ok') {
       running = true; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
       latestChunk = null;
+      showChartView();
       setStats(0, 0, 0, 0); drawChart();
       setStatus('running', 'Running');
       log('Analysis started — receiving chunks every second…', 'info');
@@ -3166,6 +3215,7 @@ const app = (() => {
     const r = JSON.parse(await window.pywebview.api.stop_analysis());
     running = false;
     if (r.status === 'ok') {
+      showChartView();
       canExport = true;
       canAnalyze = true;
       canDownloadExcel = false;
@@ -3234,7 +3284,8 @@ const app = (() => {
     analysisRunning = false;
     canDownloadExcel = true;
     sync();
-    showAnalysisModal(payload && payload.message ? payload.message : 'Patterns Analyzed Successfully');
+    showChartView();
+    toast(payload && payload.message ? payload.message : 'Patterns Analyzed Successfully', 'success');
   }
 
   function onAnalysisError(msg) {
@@ -3245,29 +3296,8 @@ const app = (() => {
   }
 
   function showAnalysisModal(message) {
-    // Instead of opening the floating modal, show the message inline in the Analysis View
-    const chartView = document.getElementById('chartView');
-    const analysisDetail = document.getElementById('analysisDetail');
-    chartView.style.display = 'none';
-    analysisDetail.style.display = 'flex';
-    // create or reuse a generic inline message container
-    let gen = document.getElementById('inline_generic');
-    if (!gen) {
-      gen = document.createElement('div');
-      gen.id = 'inline_generic';
-      gen.className = 'metric-modal-card';
-      gen.style.display = 'block';
-      const wrapper = document.getElementById('analysisDetail');
-      wrapper.insertBefore(gen, wrapper.firstChild);
-    }
-    gen.innerHTML = `
-      <div style="display:flex;justify-content:flex-end;"><button class="metric-modal-close-btn" id="inline_generic_close">×</button></div>
-      <div class="metric-modal-header"><div class="metric-modal-icon">🔎</div><div><div class="metric-modal-title">Analysis</div><div class="metric-modal-subtitle">Message</div></div></div>
-      <div style="padding:8px 12px; font-size:16px; font-weight:600; color:var(--text-primary);">${message}</div>
-    `;
-    const closeBtn = document.getElementById('inline_generic_close');
-    if (closeBtn) closeBtn.onclick = () => { gen.style.display = 'none'; analysisDetail.style.display = 'none'; chartView.style.display = 'block'; currentMetricShown = null; };
-    currentMetricShown = 'inline_generic';
+    // Keep the graph as the default view; analysis messages are surfaced via toast.
+    toast(message, 'success');
   }
 
   function closeAnalysisModal() {
