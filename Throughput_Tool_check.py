@@ -1754,6 +1754,34 @@ body.light-theme .modal-close:hover {
   max-height: 80vh;
   overflow-y: auto;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.metric-modal-card::-webkit-scrollbar {
+  width: 8px;
+}
+
+.metric-modal-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.metric-modal-card::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+}
+
+.metric-modal-card::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.5);
+}
+
+body.light-theme .metric-modal-card::-webkit-scrollbar-thumb {
+  background: rgba(37, 99, 235, 0.2);
+}
+
+body.light-theme .metric-modal-card::-webkit-scrollbar-thumb:hover {
+  background: rgba(37, 99, 235, 0.4);
 }
 
 body.light-theme .metric-modal-card {
@@ -2478,13 +2506,9 @@ body.light-theme .modal-backdrop {
     <div class="metric-modal-header">
       <div class="metric-modal-icon">⚠️</div>
       <div>
-        <div class="metric-modal-title">Frames Blown</div>
+        <div class="metric-modal-title" id="blownModalTitle">Frames Blown</div>
         <div class="metric-modal-subtitle">Threshold Exceedance Analysis</div>
       </div>
-    </div>
-    <div class="metric-detail-section">
-      <div class="metric-detail-label">Total Blown Frames</div>
-      <div class="metric-detail-value" id="blownTotal">—</div>
     </div>
     <div class="metric-detail-section">
       <div class="metric-detail-label">Percentage of Total Frames</div>
@@ -2495,7 +2519,7 @@ body.light-theme .modal-backdrop {
       <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;">Frames with processing time exceeding 2000 microseconds</div>
     </div>
     <div class="metric-detail-section">
-      <div class="metric-detail-label">Top 10 Blown Frames</div>
+      <div class="metric-detail-label" id="blownFramesCountLabel">All Blown Frames</div>
       <table class="metric-table">
         <thead>
           <tr><th>Rank</th><th>Frame #</th><th>Time (µs)</th></tr>
@@ -2524,7 +2548,7 @@ body.light-theme .modal-backdrop {
       <div class="metric-detail-value" id="avgValue">—</div>
     </div>
     <div class="metric-detail-section">
-      <div class="metric-detail-label">Calculation Details</div>
+      <div class="metric-detail-label">Summary</div>
       <div class="metric-detail-row">
         <span class="metric-detail-row-label">Total Accumulated Time</span>
         <span class="metric-detail-row-value" id="avgTotalTime">—</span>
@@ -2533,10 +2557,6 @@ body.light-theme .modal-backdrop {
         <span class="metric-detail-row-label">Number of Frames</span>
         <span class="metric-detail-row-value" id="avgFrameCount">—</span>
       </div>
-    </div>
-    <div class="metric-detail-section">
-      <div class="metric-detail-label">Formula</div>
-      <div class="metric-formula">Average = Total Accumulated Time ÷ Number of Frames</div>
     </div>
     <div class="metric-detail-section">
       <div class="metric-detail-label">Interpretation</div>
@@ -3077,18 +3097,26 @@ const app = (() => {
   }
 
   function populateBlownFramesModal() {
-    document.getElementById('blownTotal').textContent = metricData.blown.toLocaleString();
+    // Update title dynamically based on count
+    const totalBlown = metricData.blown;
+    document.getElementById('blownModalTitle').textContent = `${totalBlown.toLocaleString()} Blown Frame${totalBlown !== 1 ? 's' : ''}`;
+    
     const blownPercent = metricData.frameCount > 0 
       ? ((metricData.blown / metricData.frameCount) * 100).toFixed(2)
       : '0.00';
     document.getElementById('blownPercent').textContent = `${blownPercent}%`;
     
-    // Generate top 10 blown frames
+    // Update label to show total count
+    document.getElementById('blownFramesCountLabel').textContent = `All ${totalBlown.toLocaleString()} Blown Frame${totalBlown !== 1 ? 's' : ''}`;
+    
+    // Generate ALL blown frames (sorted by time, descending)
     const tbody = document.getElementById('blownFramesList');
     tbody.innerHTML = '';
     
-    const topBlown = metricData.blownFrames.slice(0, 10);
-    topBlown.forEach((frame, idx) => {
+    const sortedBlown = metricData.blownFrames
+      .sort((a, b) => b.timeUs - a.timeUs);
+    
+    sortedBlown.forEach((frame, idx) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${idx + 1}</td>
