@@ -879,6 +879,7 @@ body.light-theme .theme-toggle:hover {
   border-color: #3b82f6;
   color: #3b82f6;
 }
+
 .theme-icon {
   width: 18px;
   height: 18px;
@@ -2490,9 +2491,15 @@ body.light-theme #analysisDetail .metric-detail-section {
         <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
         <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
       </svg>
-      <svg class="theme-icon" id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-      </svg>
+      <svg class="theme-icon" id="moonIcon" viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        style="display:none;">
+      <path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5A7 7 0 0 0 20.5 14.5Z"/>
+    </svg>
     </button>
   </div>
 </div>
@@ -2740,14 +2747,7 @@ body.light-theme #analysisDetail .metric-detail-section {
           <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v2H3zm0 4h10v2H3zm0 4h7v2H3z"/></svg>
           Analyze
         </button>
-        <button class="btn-action download" id="btnDownloadExcel" onclick="app.downloadExcel()" title="Download Excel" disabled>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><path d="M3 14h10"/></svg>
-          Excel
-        </button>
-        <button class="btn-action download" id="btnDownloadPdf" onclick="app.downloadPdf()" title="Download PDF" disabled>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><path d="M3 14h10"/></svg>
-          PDF
-        </button>
+        <!-- Excel and PDF downloads are now generated automatically after analysis completes -->
       </div>
     </div>
   </div>
@@ -3102,8 +3102,16 @@ const app = (() => {
     const sunIcon = document.getElementById('sunIcon');
     const moonIcon = document.getElementById('moonIcon');
 
-    sunIcon.style.display = isDark ? 'block' : 'none';
-    moonIcon.style.display = isDark ? 'none' : 'block';
+    // Dark theme = show Sun
+    if (isDark) {
+      sunIcon.style.display = 'block';
+      moonIcon.style.display = 'none';
+    } 
+    // Light theme = show Moon
+    else {
+      sunIcon.style.display = 'none';
+      moonIcon.style.display = 'block';
+    }
   }
 
   // Attach theme toggle listener
@@ -3148,7 +3156,6 @@ const app = (() => {
     document.getElementById('btnStop').disabled   = !running;
     document.getElementById('btnExport').disabled = !canExport;
     document.getElementById('btnAnalyze').disabled = !canAnalyze || analysisRunning;
-    document.getElementById('btnDownloadExcel').disabled = !canDownloadExcel;
   }
 
   function showChartView() {
@@ -3323,12 +3330,43 @@ const app = (() => {
     }
   }
 
-  function onAnalysisComplete(payload) {
+  async function onAnalysisComplete(payload) {
     analysisRunning = false;
-    canDownloadExcel = true;
+    canDownloadExcel = false;
     sync();
     showChartView();
     toast(payload && payload.message ? payload.message : 'Patterns Analyzed Successfully', 'success');
+
+    // After successful analysis, automatically prompt user to save Excel then PDF.
+    try {
+      const excelResp = JSON.parse(await window.pywebview.api.download_excel());
+      if (excelResp.status === 'ok') {
+        toast(`Excel saved → ${excelResp.path}`, 'success');
+      } else if (excelResp.status === 'cancelled') {
+        toast('Excel download cancelled', 'warn');
+      } else {
+        toast('Excel download error: ' + excelResp.message, 'err');
+      }
+    } catch (e) {
+      toast('Excel download failed', 'err');
+      console.error('Excel download error', e);
+    }
+
+    try {
+      const pdfResp = JSON.parse(await window.pywebview.api.download_pdf());
+      if (pdfResp.status === 'ok') {
+        toast(`PDF saved → ${pdfResp.path}`, 'success');
+      } else if (pdfResp.status === 'cancelled') {
+        toast('PDF download cancelled', 'warn');
+      } else {
+        toast('PDF download error: ' + pdfResp.message, 'err');
+      }
+    } catch (e) {
+      toast('PDF download failed', 'err');
+      console.error('PDF download error', e);
+    }
+
+    toast('Analysis complete. Reports downloaded.', 'success');
   }
 
   function onAnalysisError(msg) {
