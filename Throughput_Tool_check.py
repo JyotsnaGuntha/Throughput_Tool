@@ -24,6 +24,7 @@ import sys
 import tempfile
 from datetime import datetime
 
+import pandas as pd
 import serial
 import serial.tools.list_ports
 import webview
@@ -63,22 +64,86 @@ class Api:
         self._session_max_us = 0
         self._session_max_frame = 0
         self._session_max_value = -1
-        self._last_exported_csv_path: str | None = None
+        self._session_dir: str | None = None
+        self._session_charts_dir: str | None = None
+        self._session_logs_dir: str | None = None
+        self._raw_excel_path: str | None = None
         self._analysis_excel_path: str | None = None
+        self._analysis_pdf_path: str | None = None
+        self._analysis_anomaly_csv_path: str | None = None
         self._analysis_temp_dir: str | None = None
 
     def _reset_session_state(self) -> None:
-        with self._lock:
-            self._data = []
-            self._session_total_us = 0
-            self._session_sample_count = 0
-            self._session_blown = 0
-            self._session_max_us = 0
-            self._session_max_frame = 0
-            self._session_max_value = -1
-        self._analysis_excel_path = None
-        self._analysis_temp_dir = None
-        self._last_exported_csv_path = None
+      with self._lock:
+        self._data = []
+        self._session_total_us = 0
+        self._session_sample_count = 0
+        self._session_blown = 0
+        self._session_max_us = 0
+        self._session_max_frame = 0
+        self._session_max_value = -1
+      self._session_dir = None
+      self._session_charts_dir = None
+      self._session_logs_dir = None
+      self._raw_excel_path = None
+      self._analysis_excel_path = None
+      self._analysis_pdf_path = None
+      self._analysis_anomaly_csv_path = None
+      self._analysis_temp_dir = None
+
+    def _create_session_dirs(self) -> None:
+      now = datetime.now()
+      day_dir = now.strftime("%Y-%m-%d")
+      session_name = f"session_{now.strftime('%H-%M-%S')}"
+      root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions", day_dir, session_name)
+      charts_dir = os.path.join(root, "charts")
+      logs_dir = os.path.join(root, "logs")
+      os.makedirs(charts_dir, exist_ok=True)
+      os.makedirs(logs_dir, exist_ok=True)
+      self._session_dir = root
+      self._session_charts_dir = charts_dir
+      self._session_logs_dir = logs_dir
+
+    def _append_log(self, message: str) -> None:
+      try:
+        if not self._session_logs_dir:
+          return
+        log_file = os.path.join(self._session_logs_dir, "session.log")
+        with open(log_file, "a", encoding="utf-8") as f:
+          f.write(f"{datetime.now().isoformat()} {message}\n")
+      except Exception:
+        pass
+
+    def _build_snapshot_dataframe(self) -> pd.DataFrame:
+      with self._lock:
+        snapshot = list(self._data)
+
+      if not snapshot:
+        raise ValueError("No live data captured for this session.")
+
+      chunked_data: dict[int, list[int]] = {}
+      for sec, frame, pct in snapshot:
+        if sec not in chunked_data:
+          chunked_data[sec] = [0] * CHUNK_SIZE
+        if 0 <= frame < CHUNK_SIZE:
+          chunked_data[sec][frame] = pct * SCALE_FACTOR
+
+      rows = []
+      for sec in sorted(chunked_data.keys()):
+        row = {"Time_Second": sec}
+        for idx, val in enumerate(chunked_data[sec]):
+          row[f"Frame_{idx}"] = val
+        rows.append(row)
+      return pd.DataFrame(rows)
+
+    def _parse_subprocess_json(self, stdout: str) -> dict:
+      lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+      for line in reversed(lines):
+        try:
+          return json.loads(line)
+        except Exception:
+          continue
+      raise ValueError("Analysis completed but returned invalid JSON output.")
 
     def _build_summary(self) -> dict[str, int]:
         with self._lock:
@@ -97,100 +162,97 @@ class Api:
             }
 
     def _write_snapshot_csv(self, filepath: str) -> int:
-        with self._lock:
-            snapshot = list(self._data)
-
-        if not snapshot:
-            raise ValueError("No data to export.")
-
-        chunked_data: dict[int, list[int]] = {}
-        for sec, frame, pct in snapshot:
-            if sec not in chunked_data:
-                chunked_data[sec] = [0] * CHUNK_SIZE
-
-            if 0 <= frame < CHUNK_SIZE:
-                chunked_data[sec][frame] = pct * SCALE_FACTOR
-
-        with open(filepath, "w", newline="") as f:
-            writer = csv.writer(f)
-            header = ["Time_Second"] + [f"Frame_{i}" for i in range(CHUNK_SIZE)]
-            writer.writerow(header)
-
-            for sec in sorted(chunked_data.keys()):
-                writer.writerow([sec] + chunked_data[sec])
-
-        return len(chunked_data)
+      df = self._build_snapshot_dataframe()
+      df.to_csv(filepath, index=False)
+      return len(df)
 
     def _prepare_analysis_input(self) -> str:
-        if self._last_exported_csv_path and os.path.exists(self._last_exported_csv_path):
-            return self._last_exported_csv_path
+      if not self._session_dir:
+        self._create_session_dirs()
 
-        if self._analysis_temp_dir is None:
-            self._analysis_temp_dir = tempfile.mkdtemp(prefix="throughput_analysis_")
+      if self._analysis_temp_dir is None:
+        self._analysis_temp_dir = os.path.join(self._session_logs_dir, "internal")
+        os.makedirs(self._analysis_temp_dir, exist_ok=True)
 
-        csv_path = os.path.join(self._analysis_temp_dir, "session_export.csv")
-        self._write_snapshot_csv(csv_path)
-        return csv_path
+      csv_path = os.path.join(self._analysis_temp_dir, "internal_session.csv")
+      self._write_snapshot_csv(csv_path)
+      return csv_path
 
     def _run_analysis_worker(self) -> None:
-        try:
-            input_csv = self._prepare_analysis_input()
-            output_dir = os.path.dirname(input_csv)
-            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_ml.py")
+      try:
+        self._append_log("Processing started")
+        input_csv = self._prepare_analysis_input()
+        output_dir = self._session_dir
 
-            completed = subprocess.run(
-                [sys.executable, script_path, "--input", input_csv, "--output-dir", output_dir],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+        raw_df = pd.read_csv(input_csv)
+        self._raw_excel_path = os.path.join(output_dir, "raw_data.xlsx")
+        raw_df.to_excel(self._raw_excel_path, index=False)
 
-            if completed.returncode != 0:
-                message = completed.stderr.strip() or completed.stdout.strip() or "Analysis failed."
-                window.evaluate_js(
-                    f"window._app && window._app.onAnalysisError({json.dumps(message)})"
-                )
-                return
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_ml.py")
+        completed = subprocess.run(
+          [sys.executable, script_path, "--input", input_csv, "--output-dir", output_dir],
+          capture_output=True,
+          text=True,
+          check=False,
+        )
 
-            try:
-                result = json.loads(completed.stdout.strip() or "{}")
-            except json.JSONDecodeError:
-                window.evaluate_js(
-                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but the model returned an invalid response.')})"
-                )
-                return
+        if completed.returncode != 0:
+          message = completed.stderr.strip() or completed.stdout.strip() or "Analysis failed."
+          window.evaluate_js(
+            f"window._app && window._app.onAnalysisError({json.dumps(message)})"
+          )
+          return
 
-            output_path = result.get("output_path")
-            if not output_path or not os.path.exists(output_path):
-                window.evaluate_js(
-                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no Excel report was generated.')})"
-                )
-                return
+        result = self._parse_subprocess_json(completed.stdout)
+        generated_excel = result.get("excel_path")
+        generated_pdf = result.get("pdf_path")
+        generated_anomaly_csv = result.get("anomaly_csv_path")
 
-            self._analysis_excel_path = output_path
-            window.evaluate_js(
-                f"window._app && window._app.onAnalysisComplete({json.dumps({'message': 'Patterns Analyzed Successfully'})})"
-            )
-        except Exception as exc:
-            window.evaluate_js(
-                f"window._app && window._app.onAnalysisError({json.dumps(str(exc))})"
-            )
-        finally:
-            self._analysis_running = False
+        if not generated_excel or not os.path.exists(generated_excel):
+          window.evaluate_js(
+            f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no Excel report was generated.')})"
+          )
+          return
+
+        if not generated_pdf or not os.path.exists(generated_pdf):
+          window.evaluate_js(
+            f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no PDF report was generated.')})"
+          )
+          return
+
+        if not generated_anomaly_csv or not os.path.exists(generated_anomaly_csv):
+          window.evaluate_js(
+            f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no anomalies CSV was generated.')})"
+          )
+          return
+
+        final_excel = os.path.join(output_dir, "analyzed_data.xlsx")
+        final_pdf = os.path.join(output_dir, "analysis_report.pdf")
+        final_anomaly_csv = os.path.join(output_dir, "anomalies.csv")
+
+        shutil.copyfile(generated_excel, final_excel)
+        shutil.copyfile(generated_pdf, final_pdf)
+        shutil.copyfile(generated_anomaly_csv, final_anomaly_csv)
+
+        self._analysis_excel_path = final_excel
+        self._analysis_pdf_path = final_pdf
+        self._analysis_anomaly_csv_path = final_anomaly_csv
+        self._append_log("Processing completed; reports ready")
+
+        summary = self._build_summary()
+        window.evaluate_js(
+          f"window._app && window._app.onAnalysisComplete({json.dumps({'message': 'Analysis Completed Successfully', 'summary': summary, 'session_dir': self._session_dir})})"
+        )
+      except Exception as exc:
+        self._append_log(f"Processing error: {exc}")
+        window.evaluate_js(
+          f"window._app && window._app.onAnalysisError({json.dumps(str(exc))})"
+        )
+      finally:
+        self._analysis_running = False
 
     def analyze(self) -> str:
-        with self._lock:
-            snapshot_ready = bool(self._data)
-
-        if not snapshot_ready:
-            return json.dumps({"status": "error", "message": "No data available to analyze."})
-        if self._analysis_running:
-            return json.dumps({"status": "error", "message": "Analysis is already running."})
-
-        self._analysis_running = True
-        worker = threading.Thread(target=self._run_analysis_worker, daemon=True)
-        worker.start()
-        return json.dumps({"status": "ok", "message": "Analysis started."})
+      return json.dumps({"status": "error", "message": "Manual analyze is disabled. Stop Analysis triggers automatic processing."})
 
     def download_excel(self) -> str:
         if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
@@ -215,8 +277,8 @@ class Api:
             return json.dumps({"status": "error", "message": str(exc)})
 
     def download_pdf(self) -> str:
-        if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
-            return json.dumps({"status": "error", "message": "No analyzed data available for PDF report."})
+        if not self._analysis_pdf_path or not os.path.exists(self._analysis_pdf_path):
+            return json.dumps({"status": "error", "message": "No analysis PDF report is available."})
 
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -230,9 +292,19 @@ class Api:
             if not result:
                 return json.dumps({"status": "cancelled", "message": "Download cancelled."})
 
-            pdf_path = result if isinstance(result, str) else result[0]
-            self._generate_pdf_report(pdf_path)
-            return json.dumps({"status": "ok", "path": pdf_path})
+            filepath = result if isinstance(result, str) else result[0]
+            shutil.copyfile(self._analysis_pdf_path, filepath)
+            return json.dumps({"status": "ok", "path": filepath})
+        except Exception as exc:
+            return json.dumps({"status": "error", "message": str(exc)})
+
+    def open_session_folder(self) -> str:
+        if not self._session_dir or not os.path.exists(self._session_dir):
+            return json.dumps({"status": "error", "message": "No completed session folder is available."})
+
+        try:
+            os.startfile(self._session_dir)
+            return json.dumps({"status": "ok", "path": self._session_dir})
         except Exception as exc:
             return json.dumps({"status": "error", "message": str(exc)})
 
@@ -478,18 +550,20 @@ class Api:
         return json.dumps({"status": "ok"})
 
     def start_analysis(self) -> str:
-        if not self._ser or not self._ser.is_open:
-            return json.dumps({"status": "error", "message": "Not connected to any port."})
-        try:
-          self._reset_session_state()
-          self._ser.reset_input_buffer()
-          self._ser.write(START_FRAME)
-          self._running = True
-          self._thread = threading.Thread(target=self._receive_loop, daemon=True)
-          self._thread.start()
-          return json.dumps({"status": "ok"})
-        except Exception as exc:
-            return json.dumps({"status": "error", "message": str(exc)})
+      if not self._ser or not self._ser.is_open:
+        return json.dumps({"status": "error", "message": "Not connected to any port."})
+      try:
+        self._reset_session_state()
+        self._create_session_dirs()
+        self._append_log("START_ANALYSIS clicked; sending START_FRAME")
+        self._ser.reset_input_buffer()
+        self._ser.write(START_FRAME)
+        self._running = True
+        self._thread = threading.Thread(target=self._receive_loop, daemon=True)
+        self._thread.start()
+        return json.dumps({"status": "ok"})
+      except Exception as exc:
+        return json.dumps({"status": "error", "message": str(exc)})
 
     def _receive_loop(self):
         second = 0
@@ -537,65 +611,44 @@ class Api:
             )
 
     def stop_analysis(self) -> str:
-        self._running = False
-        try:
-            if not self._ser or not self._ser.is_open:
-                return json.dumps({"status": "error", "message": "Serial port not open."})
-            self._ser.write(STOP_FRAME)
-            deadline = time.time() + ACK_TIMEOUT
-            ack = b""
-            while time.time() < deadline:
-                byte = self._ser.read(1)
-                if byte:
-                    ack += byte
-                if len(ack) >= 7:
-                    break
-            return json.dumps({
-                "status": "ok",
-                "message": "Analysis Done, Csv Ready to Export",
-                "ack_received": len(ack) > 0,
-            })
-        except Exception as exc:
-            return json.dumps({"status": "error", "message": str(exc)})
+      self._running = False
+      try:
+        if not self._ser or not self._ser.is_open:
+          return json.dumps({"status": "error", "message": "Serial port not open."})
+        self._ser.write(STOP_FRAME)
+        deadline = time.time() + ACK_TIMEOUT
+        ack = b""
+        while time.time() < deadline:
+          byte = self._ser.read(1)
+          if byte:
+            ack += byte
+          if len(ack) >= 7:
+            break
+
+        with self._lock:
+          snapshot_ready = bool(self._data)
+        if not snapshot_ready:
+          return json.dumps({"status": "error", "message": "No captured live data to process."})
+
+        if not self._analysis_running:
+          self._analysis_running = True
+          worker = threading.Thread(target=self._run_analysis_worker, daemon=True)
+          worker.start()
+
+        self._append_log("STOP_ANALYSIS clicked; processing started")
+        return json.dumps({
+          "status": "ok",
+          "message": "Stream stopped. Processing started.",
+          "ack_received": len(ack) > 0,
+        })
+      except Exception as exc:
+        return json.dumps({"status": "error", "message": str(exc)})
 
     def get_default_csv_name(self) -> str:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"throughput_{ts}.csv"
-        home = os.path.expanduser("~")
-        return json.dumps({"name": name, "home": home})
-        
+      return json.dumps({"status": "error", "message": "Manual CSV naming is disabled in automated mode."})
+
     def export_csv(self) -> str:
-        with self._lock:
-            snapshot = list(self._data)
-            
-        if not snapshot:
-            return json.dumps({"status": "error", "message": "No data to export."})
-            
-        try:
-            # 1. Generate default filename
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_name = f"throughput_{ts}.csv"
-            
-            # 2. Open the native Save File Dialog from Python
-            result = window.create_file_dialog(
-                webview.FileDialog.SAVE,
-                save_filename=default_name,
-                file_types=["CSV Files (*.csv)", "All files (*.*)"]
-            )
-            
-            # If the user clicks "Cancel" on the dialog
-            if not result:
-                return json.dumps({"status": "cancelled", "message": "Export cancelled."})
-                
-            filepath = result if isinstance(result, str) else result[0]
-
-            rows = self._write_snapshot_csv(filepath)
-            self._last_exported_csv_path = filepath
-
-            return json.dumps({"status": "ok", "path": filepath, "rows": rows})
-            
-        except Exception as exc:
-            return json.dumps({"status": "error", "message": str(exc)})
+      return json.dumps({"status": "error", "message": "Manual CSV export is removed. Session processing is automatic."})
    
 
     def get_summary(self) -> str:
@@ -2736,18 +2789,25 @@ body.light-theme #analysisDetail .metric-detail-section {
           <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>
           Stop
         </button>
-        <button class="btn-action export" id="btnExport" onclick="app.exportCsv()" title="Export CSV" disabled>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><line x1="2" y1="14" x2="14" y2="14"/></svg>
-          CSV
+        <button class="btn-action download" id="btnOpenSession" onclick="app.openSessionFolder()" title="Open Session Folder" disabled>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5h4l1.2 1.5H14v6.5H2z"/></svg>
+          Folder
         </button>
       </div>
       <div class="hr"></div>
       <div class="ctrl-row buttons" style="grid-template-columns: 1fr 1fr 1fr;">
-        <button class="btn-action analyze" id="btnAnalyze" onclick="app.analyze()" title="Run Analysis" disabled>
-          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v2H3zm0 4h10v2H3zm0 4h7v2H3z"/></svg>
-          Analyze
+        <button class="btn-action download" id="btnDownloadExcel" onclick="app.downloadExcel()" title="Download Excel" disabled>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><line x1="2" y1="14" x2="14" y2="14"/></svg>
+          Excel
         </button>
-        <!-- Excel and PDF downloads are now generated automatically after analysis completes -->
+        <button class="btn-action download" id="btnDownloadPdf" onclick="app.downloadPdf()" title="Download PDF" disabled>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+          PDF
+        </button>
+        <button class="btn-action analyze" id="btnStatus" title="Processing Status" disabled>
+          <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6"/></svg>
+          Waiting
+        </button>
       </div>
     </div>
   </div>
@@ -3055,7 +3115,7 @@ new ResizeObserver(drawChart).observe(document.querySelector('.chart-box'));
 
 // ── App controller ─────────────────────────────────────────────────────────────
 const app = (() => {
-  let connected = false, running = false, canExport = false, canAnalyze = false, canDownloadExcel = false, analysisRunning = false;
+  let connected = false, running = false, analysisRunning = false, reportReady = false;
   let currentMetricShown = null;
   let lastUsbConnected = null;
   
@@ -3154,8 +3214,19 @@ const app = (() => {
     btn.title = connected ? 'Disconnect from port' : 'Connect to port';
     document.getElementById('btnStart').disabled  = !connected || running;
     document.getElementById('btnStop').disabled   = !running;
-    document.getElementById('btnExport').disabled = !canExport;
-    document.getElementById('btnAnalyze').disabled = !canAnalyze || analysisRunning;
+    document.getElementById('btnDownloadExcel').disabled = !reportReady || analysisRunning;
+    document.getElementById('btnDownloadPdf').disabled = !reportReady || analysisRunning;
+    document.getElementById('btnOpenSession').disabled = !reportReady || analysisRunning;
+    const statusBtn = document.getElementById('btnStatus');
+    if (analysisRunning) {
+      statusBtn.textContent = 'Processing';
+    } else if (reportReady) {
+      statusBtn.textContent = 'Report Ready';
+    } else if (running) {
+      statusBtn.textContent = 'Streaming';
+    } else {
+      statusBtn.textContent = 'Waiting';
+    }
   }
 
   function showChartView() {
@@ -3224,7 +3295,7 @@ const app = (() => {
   async function toggleConnect() {
     if (connected) {
       await window.pywebview.api.disconnect();
-      connected = false; running = false; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
+      connected = false; running = false; analysisRunning = false; reportReady = false;
       updateUsbStatus(false);
       setStatus('', 'Disconnected');
       log('Disconnected.', 'warn');
@@ -3249,12 +3320,12 @@ const app = (() => {
   async function startAnalysis() {
     const r = JSON.parse(await window.pywebview.api.start_analysis());
     if (r.status === 'ok') {
-      running = true; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
+      running = true; analysisRunning = false; reportReady = false;
       latestChunk = null;
       showChartView();
       setStats(0, 0, 0, 0); drawChart();
-      setStatus('running', 'Running');
-      log('Analysis started — receiving chunks every second…', 'info');
+      setStatus('running', 'Live Streaming');
+      log('Analysis started — receiving live chunks every second.', 'info');
     } else {
       log('Start failed: ' + r.message, 'err');
     }
@@ -3266,11 +3337,10 @@ const app = (() => {
     running = false;
     if (r.status === 'ok') {
       showChartView();
-      canExport = true;
-      canAnalyze = true;
-      canDownloadExcel = false;
-      setStatus('done', 'Complete');
-      toast(r.message, 'success');
+      analysisRunning = true;
+      reportReady = false;
+      setStatus('running', 'Processing');
+      toast('Stream stopped. Processing live session data...', 'info');
       log(r.message + (r.ack_received ? ' (ACK received)' : ' (ACK timeout)'), 'ok');
       const s = JSON.parse(await window.pywebview.api.get_summary());
       setStats(s.blown, s.avg_us, s.max_us, s.max_frame);
@@ -3278,21 +3348,6 @@ const app = (() => {
       log('Stop error: ' + r.message, 'err');
     }
     sync();
-  }
-
-  async function exportCsv() {
-    // We now just call the python function without passing a filepath. 
-    // Python handles the dialog natively.
-    const r = JSON.parse(await window.pywebview.api.export_csv());
-    
-    if (r.status === 'ok') {
-      toast(`Saved ${Number(r.rows).toLocaleString()} rows → ${r.path}`, 'success');
-      log(`CSV exported (${Number(r.rows).toLocaleString()} rows) → ${r.path}`, 'ok');
-    } else if (r.status === 'cancelled') {
-      log(r.message, 'warn');
-    } else {
-      log('Export error: ' + r.message, 'err');
-    }
   }
 
   function onChunk(data) {
@@ -3306,19 +3361,6 @@ const app = (() => {
     log('Serial error: ' + msg, 'err'); sync();
   }
 
-  async function analyze() {
-    if (analysisRunning) return;
-    const r = JSON.parse(await window.pywebview.api.analyze());
-    if (r.status === 'ok') {
-      analysisRunning = true;
-      canDownloadExcel = false;
-      toast(r.message, 'info');
-      sync();
-    } else {
-      toast(r.message, 'err');
-    }
-  }
-
   async function downloadExcel() {
     const r = JSON.parse(await window.pywebview.api.download_excel());
     if (r.status === 'ok') {
@@ -3330,48 +3372,38 @@ const app = (() => {
     }
   }
 
+  async function downloadPdf() {
+    const r = JSON.parse(await window.pywebview.api.download_pdf());
+    if (r.status === 'ok') {
+      toast(`PDF downloaded → ${r.path}`, 'success');
+    } else if (r.status === 'cancelled') {
+      toast(r.message, 'warn');
+    } else {
+      toast(r.message, 'err');
+    }
+  }
+
+  async function openSessionFolder() {
+    const r = JSON.parse(await window.pywebview.api.open_session_folder());
+    if (r.status === 'ok') {
+      toast(`Session folder opened → ${r.path}`, 'success');
+    } else {
+      toast(r.message, 'err');
+    }
+  }
+
   async function onAnalysisComplete(payload) {
     analysisRunning = false;
-    canDownloadExcel = false;
+    reportReady = true;
     sync();
     showChartView();
-    toast(payload && payload.message ? payload.message : 'Patterns Analyzed Successfully', 'success');
-
-    // After successful analysis, automatically prompt user to save Excel then PDF.
-    try {
-      const excelResp = JSON.parse(await window.pywebview.api.download_excel());
-      if (excelResp.status === 'ok') {
-        toast(`Excel saved → ${excelResp.path}`, 'success');
-      } else if (excelResp.status === 'cancelled') {
-        toast('Excel download cancelled', 'warn');
-      } else {
-        toast('Excel download error: ' + excelResp.message, 'err');
-      }
-    } catch (e) {
-      toast('Excel download failed', 'err');
-      console.error('Excel download error', e);
-    }
-
-    try {
-      const pdfResp = JSON.parse(await window.pywebview.api.download_pdf());
-      if (pdfResp.status === 'ok') {
-        toast(`PDF saved → ${pdfResp.path}`, 'success');
-      } else if (pdfResp.status === 'cancelled') {
-        toast('PDF download cancelled', 'warn');
-      } else {
-        toast('PDF download error: ' + pdfResp.message, 'err');
-      }
-    } catch (e) {
-      toast('PDF download failed', 'err');
-      console.error('PDF download error', e);
-    }
-
-    toast('Analysis complete. Reports downloaded.', 'success');
+    toast(payload && payload.message ? payload.message : 'Analysis Completed Successfully', 'success');
+    log('Report Ready: Download Excel, Download PDF, or Open Session Folder.', 'ok');
   }
 
   function onAnalysisError(msg) {
     analysisRunning = false;
-    canDownloadExcel = false;
+    reportReady = false;
     toast(msg, 'err');
     sync();
   }
@@ -3794,7 +3826,7 @@ const app = (() => {
     document.addEventListener('keydown', handleGlobalKeyboard);
   });
 
-  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, downloadExcel, onAnalysisComplete, onAnalysisError, closeAnalysisModal, openMetricModal, closeMetricModal, toggleMetricView };
+  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, refreshPorts, onChunk, onError, downloadExcel, downloadPdf, openSessionFolder, onAnalysisComplete, onAnalysisError, closeAnalysisModal, openMetricModal, closeMetricModal, toggleMetricView };
 })();
 
 window._app = app;
