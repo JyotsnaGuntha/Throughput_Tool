@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import tempfile
 from datetime import datetime
 
 import matplotlib
@@ -247,8 +248,8 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
 def save_excel_and_csv(analyzed_df: pd.DataFrame, frame_cols: list[str], base_name: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
 
-    excel_path = os.path.join(output_dir, f"{base_name}_ML_Analyzed.xlsx")
-    anomaly_csv_path = os.path.join(output_dir, f"{base_name}_Anomalies.csv")
+    excel_path = os.path.join(output_dir, "analyzed_data.xlsx")
+    anomaly_csv_path = os.path.join(output_dir, "anomalies.csv")
 
     ordered_cols = [
         "Time_Second",
@@ -518,11 +519,11 @@ def run_pipeline(input_csv: str, output_dir: str):
 
     excel_path, anomaly_csv_path, anomaly_count = save_excel_and_csv(analyzed_df, frame_cols, base_name, output_dir)
 
-    charts_dir = os.path.join(output_dir, "charts")
-    chart_paths = generate_visualizations(analyzed_df, frame_cols, charts_dir)
+    with tempfile.TemporaryDirectory(prefix="throughput_charts_") as charts_dir:
+        chart_paths = generate_visualizations(analyzed_df, frame_cols, charts_dir)
 
-    pdf_path = os.path.join(output_dir, f"{base_name}_Analysis_Report.pdf")
-    generate_pdf_report(pdf_path, analyzed_df, meta, chart_paths, input_csv)
+        pdf_path = os.path.join(output_dir, "analysis_report.pdf")
+        generate_pdf_report(pdf_path, analyzed_df, meta, chart_paths, input_csv)
 
     result = {
         "status": "success",

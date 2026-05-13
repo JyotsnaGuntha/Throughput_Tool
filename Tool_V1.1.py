@@ -24,7 +24,6 @@ import sys
 import tempfile
 from datetime import datetime
 
-import pandas as pd
 import serial
 import serial.tools.list_ports
 import webview
@@ -35,115 +34,68 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
-# ─────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 #  Protocol constants
-# ─────────────────────────────────────────────
-#START_FRAME  = bytes([0xFE, 0xFE, 0xFE, 0x80, 0xFE, 0xFE, 0xFE])
+#  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 START_FRAME = b'\xFE\xFE\xFE\x80\xFE\xFE\xFE'
-#STOP_FRAME   = bytes([0xFE, 0xFE, 0xFE, 0x81, 0xFE, 0xFE, 0xFE])
 STOP_FRAME  = b'\xFE\xFE\xFE\x81\xFE\xFE\xFE'
 CHUNK_SIZE   = 500
 SCALE_FACTOR = 20
 ACK_TIMEOUT  = 3.0
 BLOWN_THRESHOLD = 2000   # time
 
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 #  Backend API
-# ─────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 class Api:
     def __init__(self):
         self._ser: serial.Serial | None = None
         self._running = False
         self._analysis_running = False
+
         self._lock = threading.Lock()
+
         self._data: list[tuple[int, int, int]] = []   # (second, frame_idx, raw_percent)
+
         self._thread: threading.Thread | None = None
+
         self._session_total_us = 0
         self._session_sample_count = 0
         self._session_blown = 0
         self._session_max_us = 0
         self._session_max_frame = 0
         self._session_max_value = -1
-        self._session_dir: str | None = None
-        self._session_charts_dir: str | None = None
-        self._session_logs_dir: str | None = None
-        self._raw_excel_path: str | None = None
+
+        # Extended analytics state
+        self._blown_frames_list: list = []          # [{frameIndex, second, timeUs}]
+        self._frame_totals: list = [0] * CHUNK_SIZE # running µs sum per frame index
+        self._frame_counts: list = [0] * CHUNK_SIZE # sample count per frame index
+        self._top10_frames: list = []               # top-10 [{frameIndex, second, timeUs}]
+
+        self._last_exported_csv_path: str | None = None
         self._analysis_excel_path: str | None = None
         self._analysis_pdf_path: str | None = None
         self._analysis_anomaly_csv_path: str | None = None
         self._analysis_temp_dir: str | None = None
 
     def _reset_session_state(self) -> None:
-      with self._lock:
-        self._data = []
-        self._session_total_us = 0
-        self._session_sample_count = 0
-        self._session_blown = 0
-        self._session_max_us = 0
-        self._session_max_frame = 0
-        self._session_max_value = -1
-      self._session_dir = None
-      self._session_charts_dir = None
-      self._session_logs_dir = None
-      self._raw_excel_path = None
-      self._analysis_excel_path = None
-      self._analysis_pdf_path = None
-      self._analysis_anomaly_csv_path = None
-      self._analysis_temp_dir = None
-
-    def _create_session_dirs(self) -> None:
-      now = datetime.now()
-      day_dir = now.strftime("%Y-%m-%d")
-      session_name = f"session_{now.strftime('%H-%M-%S')}"
-      root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions", day_dir, session_name)
-      charts_dir = os.path.join(root, "charts")
-      logs_dir = os.path.join(root, "logs")
-      os.makedirs(charts_dir, exist_ok=True)
-      os.makedirs(logs_dir, exist_ok=True)
-      self._session_dir = root
-      self._session_charts_dir = charts_dir
-      self._session_logs_dir = logs_dir
-
-    def _append_log(self, message: str) -> None:
-      try:
-        if not self._session_logs_dir:
-          return
-        log_file = os.path.join(self._session_logs_dir, "session.log")
-        with open(log_file, "a", encoding="utf-8") as f:
-          f.write(f"{datetime.now().isoformat()} {message}\n")
-      except Exception:
-        pass
-
-    def _build_snapshot_dataframe(self) -> pd.DataFrame:
-      with self._lock:
-        snapshot = list(self._data)
-
-      if not snapshot:
-        raise ValueError("No live data captured for this session.")
-
-      chunked_data: dict[int, list[int]] = {}
-      for sec, frame, pct in snapshot:
-        if sec not in chunked_data:
-          chunked_data[sec] = [0] * CHUNK_SIZE
-        if 0 <= frame < CHUNK_SIZE:
-          chunked_data[sec][frame] = pct * SCALE_FACTOR
-
-      rows = []
-      for sec in sorted(chunked_data.keys()):
-        row = {"Time_Second": sec}
-        for idx, val in enumerate(chunked_data[sec]):
-          row[f"Frame_{idx}"] = val
-        rows.append(row)
-      return pd.DataFrame(rows)
-
-    def _parse_subprocess_json(self, stdout: str) -> dict:
-      lines = [line.strip() for line in stdout.splitlines() if line.strip()]
-      for line in reversed(lines):
-        try:
-          return json.loads(line)
-        except Exception:
-          continue
-      raise ValueError("Analysis completed but returned invalid JSON output.")
+        with self._lock:
+            self._data = []
+            self._session_total_us = 0
+            self._session_sample_count = 0
+            self._session_blown = 0
+            self._session_max_us = 0
+            self._session_max_frame = 0
+            self._session_max_value = -1
+            self._blown_frames_list = []
+            self._frame_totals = [0] * CHUNK_SIZE
+            self._frame_counts = [0] * CHUNK_SIZE
+            self._top10_frames = []
+        self._analysis_excel_path = None
+        self._analysis_pdf_path = None
+        self._analysis_anomaly_csv_path = None
+        self._analysis_temp_dir = None
+        self._last_exported_csv_path = None
 
     def _build_summary(self) -> dict[str, int]:
         with self._lock:
@@ -162,123 +114,167 @@ class Api:
             }
 
     def _write_snapshot_csv(self, filepath: str) -> int:
-      df = self._build_snapshot_dataframe()
-      df.to_csv(filepath, index=False)
-      return len(df)
+        with self._lock:
+            snapshot = list(self._data)
+
+        if not snapshot:
+            raise ValueError("No data to export.")
+
+        chunked_data: dict[int, list[int]] = {}
+        for sec, frame, pct in snapshot:
+            if sec not in chunked_data:
+                chunked_data[sec] = [0] * CHUNK_SIZE
+
+            if 0 <= frame < CHUNK_SIZE:
+                chunked_data[sec][frame] = pct * SCALE_FACTOR
+
+        with open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            header = ["Time_Second"] + [f"Frame_{i}" for i in range(CHUNK_SIZE)]
+            writer.writerow(header)
+
+            for sec in sorted(chunked_data.keys()):
+                writer.writerow([sec] + chunked_data[sec])
+
+        return len(chunked_data)
 
     def _prepare_analysis_input(self) -> str:
-      if not self._session_dir:
-        self._create_session_dirs()
+        if self._last_exported_csv_path and os.path.exists(self._last_exported_csv_path):
+            return self._last_exported_csv_path
 
-      if self._analysis_temp_dir is None:
-        self._analysis_temp_dir = os.path.join(self._session_logs_dir, "internal")
-        os.makedirs(self._analysis_temp_dir, exist_ok=True)
+        if self._analysis_temp_dir is None:
+            self._analysis_temp_dir = tempfile.mkdtemp(prefix="throughput_analysis_")
 
-      csv_path = os.path.join(self._analysis_temp_dir, "internal_session.csv")
-      self._write_snapshot_csv(csv_path)
-      return csv_path
+        csv_path = os.path.join(self._analysis_temp_dir, "session_export.csv")
+        self._write_snapshot_csv(csv_path)
+        return csv_path
+
+    def _parse_subprocess_json(self, stdout: str) -> dict:
+        lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+        for line in reversed(lines):
+            try:
+                return json.loads(line)
+            except Exception:
+                continue
+        raise ValueError("Analysis completed but returned invalid JSON output.")
 
     def _run_analysis_worker(self) -> None:
-      try:
-        self._append_log("Processing started")
-        input_csv = self._prepare_analysis_input()
-        output_dir = self._session_dir
-
-        raw_df = pd.read_csv(input_csv)
-        self._raw_excel_path = os.path.join(output_dir, "raw_data.xlsx")
-        raw_df.to_excel(self._raw_excel_path, index=False)
-
-        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_ml.py")
-        completed = subprocess.run(
-          [sys.executable, script_path, "--input", input_csv, "--output-dir", output_dir],
-          capture_output=True,
-          text=True,
-          check=False,
-        )
-
-        if completed.returncode != 0:
-          message = completed.stderr.strip() or completed.stdout.strip() or "Analysis failed."
-          window.evaluate_js(
-            f"window._app && window._app.onAnalysisError({json.dumps(message)})"
-          )
-          return
-
-        result = self._parse_subprocess_json(completed.stdout)
-        generated_excel = result.get("excel_path")
-        generated_pdf = result.get("pdf_path")
-        generated_anomaly_csv = result.get("anomaly_csv_path")
-
-        if not generated_excel or not os.path.exists(generated_excel):
-          window.evaluate_js(
-            f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no Excel report was generated.')})"
-          )
-          return
-
-        if not generated_pdf or not os.path.exists(generated_pdf):
-          window.evaluate_js(
-            f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no PDF report was generated.')})"
-          )
-          return
-
-        if not generated_anomaly_csv or not os.path.exists(generated_anomaly_csv):
-          window.evaluate_js(
-            f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no anomalies CSV was generated.')})"
-          )
-          return
-
-        final_excel = os.path.join(output_dir, "analyzed_data.xlsx")
-        final_pdf = os.path.join(output_dir, "analysis_report.pdf")
-        final_anomaly_csv = os.path.join(output_dir, "anomalies.csv")
-
-        shutil.copyfile(generated_excel, final_excel)
-        shutil.copyfile(generated_pdf, final_pdf)
-        shutil.copyfile(generated_anomaly_csv, final_anomaly_csv)
-
-        self._analysis_excel_path = final_excel
-        self._analysis_pdf_path = final_pdf
-        self._analysis_anomaly_csv_path = final_anomaly_csv
-        self._append_log("Processing completed; reports ready")
-
-        summary = self._build_summary()
-        window.evaluate_js(
-          f"window._app && window._app.onAnalysisComplete({json.dumps({'message': 'Analysis Completed Successfully', 'summary': summary, 'session_dir': self._session_dir})})"
-        )
-      except Exception as exc:
-        self._append_log(f"Processing error: {exc}")
-        window.evaluate_js(
-          f"window._app && window._app.onAnalysisError({json.dumps(str(exc))})"
-        )
-      finally:
-        self._analysis_running = False
-
-    def analyze(self) -> str:
-      return json.dumps({"status": "error", "message": "Manual analyze is disabled. Stop Analysis triggers automatic processing."})
-
-    def download_excel(self) -> str:
-        if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
-            return json.dumps({"status": "error", "message": "No analyzed Excel report is available."})
-
         try:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_name = f"throughput_{ts}_ML_Analyzed.xlsx"
-            result = window.create_file_dialog(
-                webview.FileDialog.SAVE,
-                save_filename=default_name,
-                file_types=["Excel Files (*.xlsx)", "All files (*.*)"]
+            input_csv = self._prepare_analysis_input()
+            output_dir = os.path.dirname(input_csv)
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_ml.py")
+
+            completed = subprocess.run(
+                [sys.executable, script_path, "--input", input_csv, "--output-dir", output_dir],
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
-            if not result:
-                return json.dumps({"status": "cancelled", "message": "Download cancelled."})
+            if completed.returncode != 0:
+                message = completed.stderr.strip() or completed.stdout.strip() or "Analysis failed."
+                window.evaluate_js(
+                    f"window._app && window._app.onAnalysisError({json.dumps(message)})"
+                )
+                return
 
-            filepath = result if isinstance(result, str) else result[0]
-            shutil.copyfile(self._analysis_excel_path, filepath)
-            return json.dumps({"status": "ok", "path": filepath})
+            try:
+              result = self._parse_subprocess_json(completed.stdout)
+            except Exception as exc:
+              window.evaluate_js(
+                f"window._app && window._app.onAnalysisError({json.dumps(str(exc))})"
+              )
+              return
+
+            excel_path = result.get("excel_path") or result.get("output_path")
+            pdf_path = result.get("pdf_path")
+            anomaly_csv_path = result.get("anomaly_csv_path")
+
+            if not excel_path or not os.path.exists(excel_path):
+                window.evaluate_js(
+                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no Excel report was generated.')})"
+                )
+                return
+
+            if not pdf_path or not os.path.exists(pdf_path):
+              window.evaluate_js(
+                f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no PDF report was generated.')})"
+              )
+              return
+
+            self._analysis_excel_path = excel_path
+            self._analysis_pdf_path = pdf_path
+            self._analysis_anomaly_csv_path = anomaly_csv_path if anomaly_csv_path and os.path.exists(anomaly_csv_path) else None
+            window.evaluate_js(
+              f"window._app && window._app.onAnalysisComplete({json.dumps({'message': 'Patterns analyzed successfully. Export Analysis will save both Excel and PDF reports.'})})"
+            )
         except Exception as exc:
-            return json.dumps({"status": "error", "message": str(exc)})
+            window.evaluate_js(
+                f"window._app && window._app.onAnalysisError({json.dumps(str(exc))})"
+            )
+        finally:
+            self._analysis_running = False
 
+    def analyze(self) -> str:
+        with self._lock:
+            snapshot_ready = bool(self._data)
+
+        if not snapshot_ready:
+            return json.dumps({"status": "error", "message": "No data available to analyze."})
+        if self._analysis_running:
+            return json.dumps({"status": "error", "message": "Analysis is already running."})
+
+        self._analysis_running = True
+        worker = threading.Thread(target=self._run_analysis_worker, daemon=True)
+        worker.start()
+        return json.dumps({"status": "ok", "message": "Analysis started."})
+
+    def export_analysis(self) -> str:
+      if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
+        return json.dumps({"status": "error", "message": "No analyzed Excel report is available. Run Analyze first."})
+
+      if not self._analysis_pdf_path or not os.path.exists(self._analysis_pdf_path):
+        return json.dumps({"status": "error", "message": "No analysis PDF report is available. Run Analyze first."})
+
+      try:
+        result = window.create_file_dialog(
+          webview.FileDialog.FOLDER,
+          directory=os.path.expanduser("~")
+        )
+
+        if not result:
+          return json.dumps({"status": "cancelled", "message": "Export cancelled."})
+
+        export_dir = result if isinstance(result, str) else result[0]
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        excel_dest = os.path.join(export_dir, f"throughput_{ts}_ML_Analyzed.xlsx")
+        pdf_dest = os.path.join(export_dir, f"throughput_{ts}_Analysis_Report.pdf")
+
+        shutil.copyfile(self._analysis_excel_path, excel_dest)
+        shutil.copyfile(self._analysis_pdf_path, pdf_dest)
+
+        anomaly_dest = None
+        if self._analysis_anomaly_csv_path and os.path.exists(self._analysis_anomaly_csv_path):
+          anomaly_dest = os.path.join(export_dir, f"throughput_{ts}_Anomalies.csv")
+          shutil.copyfile(self._analysis_anomaly_csv_path, anomaly_dest)
+
+        return json.dumps({
+          "status": "ok",
+          "excel_path": excel_dest,
+          "pdf_path": pdf_dest,
+          "anomaly_csv_path": anomaly_dest,
+        })
+      except Exception as exc:
+        return json.dumps({"status": "error", "message": str(exc)})
+
+    def download_excel(self) -> str:
+      # Backward-compatible API alias for older frontend hooks.
+      return self.export_analysis()
+        
     def download_pdf(self) -> str:
-        if not self._analysis_pdf_path or not os.path.exists(self._analysis_pdf_path):
-            return json.dumps({"status": "error", "message": "No analysis PDF report is available."})
+        if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
+            return json.dumps({"status": "error", "message": "No analyzed data available for PDF report."})
 
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -292,29 +288,17 @@ class Api:
             if not result:
                 return json.dumps({"status": "cancelled", "message": "Download cancelled."})
 
-            filepath = result if isinstance(result, str) else result[0]
-            shutil.copyfile(self._analysis_pdf_path, filepath)
-            return json.dumps({"status": "ok", "path": filepath})
-        except Exception as exc:
-            return json.dumps({"status": "error", "message": str(exc)})
-
-    def open_session_folder(self) -> str:
-        if not self._session_dir or not os.path.exists(self._session_dir):
-            return json.dumps({"status": "error", "message": "No completed session folder is available."})
-
-        try:
-            os.startfile(self._session_dir)
-            return json.dumps({"status": "ok", "path": self._session_dir})
+            pdf_path = result if isinstance(result, str) else result[0]
+            self._generate_pdf_report(pdf_path)
+            return json.dumps({"status": "ok", "path": pdf_path})
         except Exception as exc:
             return json.dumps({"status": "error", "message": str(exc)})
 
     def _generate_pdf_report(self, output_path: str) -> None:
-        """Generate a professional PDF report of the throughput analysis."""
         doc = SimpleDocTemplate(output_path, pagesize=letter, topMargin=0.75*inch, bottomMargin=0.75*inch)
         styles = getSampleStyleSheet()
         story = []
 
-        # Custom styles
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
@@ -337,11 +321,9 @@ class Api:
             borderPadding=8
         )
 
-        # Report title and metadata
         story.append(Paragraph("Throughput Analysis Report", title_style))
         story.append(Spacer(1, 0.2*inch))
 
-        # Report info
         gen_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         info_data = [
             ["Report Generated:", gen_time],
@@ -364,7 +346,6 @@ class Api:
         story.append(info_table)
         story.append(Spacer(1, 0.3*inch))
 
-        # Session Summary
         story.append(Paragraph("Session Summary", heading_style))
         summary = self._build_summary()
         summary_data = [
@@ -395,7 +376,6 @@ class Api:
         story.append(summary_table)
         story.append(Spacer(1, 0.3*inch))
 
-        # Key Performance Metrics
         story.append(Paragraph("Key Performance Metrics", heading_style))
         metrics_data = [
             ["Metric", "Value", "Status"],
@@ -424,21 +404,18 @@ class Api:
         story.append(metrics_table)
         story.append(Spacer(1, 0.3*inch))
 
-        # Analysis Insights
         story.append(Paragraph("Analysis Insights & Observations", heading_style))
         insights = self._generate_insights(summary)
         for insight in insights:
             story.append(Paragraph(f"• {insight}", ParagraphStyle('Insight', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#374151'), spaceAfter=6, leftIndent=20)))
         story.append(Spacer(1, 0.2*inch))
 
-        # Recommendations
         story.append(Paragraph("Recommendations", heading_style))
         recommendations = self._generate_recommendations(summary)
         for rec in recommendations:
             story.append(Paragraph(f"• {rec}", ParagraphStyle('Rec', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#374151'), spaceAfter=6, leftIndent=20)))
         story.append(Spacer(1, 0.2*inch))
 
-        # Data Characteristics
         story.append(Paragraph("Data Characteristics", heading_style))
         characteristics_data = [
             ["Total Samples Collected", f"{summary['rows']:,}"],
@@ -462,29 +439,24 @@ class Api:
         story.append(char_table)
         story.append(Spacer(1, 0.3*inch))
 
-        # Conclusion
         story.append(Paragraph("Conclusion", heading_style))
         conclusion = self._generate_conclusion(summary)
         story.append(Paragraph(conclusion, styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
 
-        # Footer
         footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#9ca3af'), alignment=TA_CENTER)
         story.append(Paragraph("This report was automatically generated by the Throughput Analysis Tool.", footer_style))
 
         doc.build(story)
 
     def _calculate_performance_index(self, summary: dict) -> int:
-        """Calculate a performance index (0-100) based on analysis metrics."""
         if summary['rows'] == 0:
             return 0
-        # Performance inversely proportional to blown frames
         blown_ratio = summary['blown'] / max(summary['rows'], 1)
         performance = int(max(0, 100 - (blown_ratio * 100)))
         return performance
 
     def _generate_insights(self, summary: dict) -> list[str]:
-        """Generate insights based on analysis data."""
         insights = []
         if summary['rows'] > 0:
             insights.append(f"Analyzed {summary['rows']:,} data points over {summary['seconds']} seconds of operation.")
@@ -502,7 +474,6 @@ class Api:
         return insights
 
     def _generate_recommendations(self, summary: dict) -> list[str]:
-        """Generate recommendations based on analysis results."""
         recommendations = []
         if summary['blown'] > 0:
             recommendations.append("Investigate and optimize processes that caused frame delays exceeding the 2000µs threshold.")
@@ -516,7 +487,6 @@ class Api:
         return recommendations
 
     def _generate_conclusion(self, summary: dict) -> str:
-        """Generate a professional conclusion statement."""
         perf_index = self._calculate_performance_index(summary)
         if perf_index >= 95:
             return f"Overall Performance: Excellent ({perf_index}%). All systems are operating within optimal parameters with minimal frame delays. No immediate action required."
@@ -528,8 +498,13 @@ class Api:
             return f"Overall Performance: Poor ({perf_index}%). Significant performance degradation observed. Immediate investigation and remediation recommended."
 
     def get_ports(self) -> str:
-        ports = serial.tools.list_ports.comports()
-        return json.dumps([p.device for p in ports])
+        # Get all ports and filter only those that are USB devices
+        all_ports = serial.tools.list_ports.comports()
+        usb_ports = [
+            p.device for p in all_ports 
+            if p.vid is not None or "USB" in (p.hwid or "").upper()
+        ]
+        return json.dumps(usb_ports)
 
     def connect(self, port: str, baud: str) -> str:
         try:
@@ -541,6 +516,10 @@ class Api:
             return json.dumps({"status": "error", "message": f"Unable to Connect To Com Port {port}"})
 
     def disconnect(self) -> str:
+        
+        if self._running or self._analysis_running:
+            return json.dumps({"status": "error", "message": "Cannot disconnect while an analysis process is running. Please stop it first."})
+            
         self._running = False
         try:
             if self._ser and self._ser.is_open:
@@ -550,20 +529,18 @@ class Api:
         return json.dumps({"status": "ok"})
 
     def start_analysis(self) -> str:
-      if not self._ser or not self._ser.is_open:
-        return json.dumps({"status": "error", "message": "Not connected to any port."})
-      try:
-        self._reset_session_state()
-        self._create_session_dirs()
-        self._append_log("START_ANALYSIS clicked; sending START_FRAME")
-        self._ser.reset_input_buffer()
-        self._ser.write(START_FRAME)
-        self._running = True
-        self._thread = threading.Thread(target=self._receive_loop, daemon=True)
-        self._thread.start()
-        return json.dumps({"status": "ok"})
-      except Exception as exc:
-        return json.dumps({"status": "error", "message": str(exc)})
+        if not self._ser or not self._ser.is_open:
+            return json.dumps({"status": "error", "message": "Not connected to any port."})
+        try:
+          self._reset_session_state()
+          self._ser.reset_input_buffer()
+          self._ser.write(START_FRAME)
+          self._running = True
+          self._thread = threading.Thread(target=self._receive_loop, daemon=True)
+          self._thread.start()
+          return json.dumps({"status": "ok"})
+        except Exception as exc:
+            return json.dumps({"status": "error", "message": str(exc)})
 
     def _receive_loop(self):
         second = 0
@@ -573,26 +550,33 @@ class Api:
             except Exception as exc:
                 if self._running:
                     window.evaluate_js(
-                        f"window._app && window._app.onError({json.dumps(str(exc))})" # check this
+                        f"window._app && window._app.onError({json.dumps(str(exc))})"
                     )
                 break
             if len(chunk) != CHUNK_SIZE:
                 continue
             second += 1
+
             rows: list[tuple[int, int, int]] = []
             chunk_total_us = 0
             chunk_blown = 0
             chunk_max_us = -1
             chunk_max_frame = 0
+            chunk_blown_frames: list = []          # new blown frames this chunk
+            chunk_frame_us: list = []              # µs value per frame in this chunk
+
             for i, raw in enumerate(chunk):
-                rows.append((second, i, raw))   # store raw percent (0-100)
+                rows.append((second, i, raw))
                 raw_us = raw * SCALE_FACTOR
                 chunk_total_us += raw_us
+                chunk_frame_us.append(raw_us)
                 if raw_us > BLOWN_THRESHOLD:
-                  chunk_blown += 1
+                    chunk_blown += 1
+                    chunk_blown_frames.append({'frameIndex': i, 'second': second, 'timeUs': raw_us})
                 if raw_us > chunk_max_us:
                     chunk_max_us = raw_us
                     chunk_max_frame = i
+
             with self._lock:
                 self._data.extend(rows)
                 self._session_sample_count += len(chunk)
@@ -602,71 +586,104 @@ class Api:
                     self._session_max_us = chunk_max_us
                     self._session_max_frame = chunk_max_frame
 
-            # Pass raw percent values for the scatter plot (frame index → percent)
-            frame_data = list(chunk)   # list of 500 percent values
+                # Extended analytics
+                self._blown_frames_list.extend(chunk_blown_frames)
+
+                for i, us in enumerate(chunk_frame_us):
+                    self._frame_totals[i] += us
+                    self._frame_counts[i] += 1
+
+                # Maintain top-10 across all frames seen so far
+                candidates = list(self._top10_frames)
+                for i, us in enumerate(chunk_frame_us):
+                    candidates.append({'frameIndex': i, 'second': second, 'timeUs': us})
+                candidates.sort(key=lambda x: x['timeUs'], reverse=True)
+                self._top10_frames = candidates[:10]
+
+                # Build snapshot for JS (do this inside the lock for consistency)
+                frame_avgs = [
+                    self._frame_totals[i] // self._frame_counts[i]
+                    if self._frame_counts[i] > 0 else 0
+                    for i in range(CHUNK_SIZE)
+                ]
+                top10_snapshot = list(self._top10_frames)
+
+            frame_data = list(chunk)
             stats = self._build_summary()
 
             window.evaluate_js(
-                f"window._app && window._app.onChunk({json.dumps({'second': second, 'blown': stats['blown'], 'avg_us': stats['avg_us'], 'max_us': stats['max_us'], 'max_frame': stats['max_frame'], 'frame_data': frame_data})})"
+                f"window._app && window._app.onChunk({json.dumps({'second': second, 'blown': stats['blown'], 'avg_us': stats['avg_us'], 'max_us': stats['max_us'], 'max_frame': stats['max_frame'], 'frame_data': frame_data, 'new_blown_frames': chunk_blown_frames, 'frame_avgs': frame_avgs, 'top10': top10_snapshot})})"
             )
 
     def stop_analysis(self) -> str:
-      self._running = False
-      try:
-        if not self._ser or not self._ser.is_open:
-          return json.dumps({"status": "error", "message": "Serial port not open."})
-        self._ser.write(STOP_FRAME)
-        deadline = time.time() + ACK_TIMEOUT
-        ack = b""
-        while time.time() < deadline:
-          byte = self._ser.read(1)
-          if byte:
-            ack += byte
-          if len(ack) >= 7:
-            break
-
-        with self._lock:
-          snapshot_ready = bool(self._data)
-        if not snapshot_ready:
-          return json.dumps({"status": "error", "message": "No captured live data to process."})
-
-        if not self._analysis_running:
-          self._analysis_running = True
-          worker = threading.Thread(target=self._run_analysis_worker, daemon=True)
-          worker.start()
-
-        self._append_log("STOP_ANALYSIS clicked; processing started")
-        return json.dumps({
-          "status": "ok",
-          "message": "Stream stopped. Processing started.",
-          "ack_received": len(ack) > 0,
-        })
-      except Exception as exc:
-        return json.dumps({"status": "error", "message": str(exc)})
+        self._running = False
+        try:
+            if not self._ser or not self._ser.is_open:
+                return json.dumps({"status": "error", "message": "Serial port not open."})
+            self._ser.write(STOP_FRAME)
+            deadline = time.time() + ACK_TIMEOUT
+            ack = b""
+            while time.time() < deadline:
+                byte = self._ser.read(1)
+                if byte:
+                    ack += byte
+                if len(ack) >= 7:
+                    break
+            return json.dumps({
+                "status": "ok",
+                "message": "Analysis Done, Csv Ready to Export",
+                "ack_received": len(ack) > 0,
+            })
+        except Exception as exc:
+            return json.dumps({"status": "error", "message": str(exc)})
 
     def get_default_csv_name(self) -> str:
-      return json.dumps({"status": "error", "message": "Manual CSV naming is disabled in automated mode."})
-
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"throughput_{ts}.csv"
+        home = os.path.expanduser("~")
+        return json.dumps({"name": name, "home": home})
+        
     def export_csv(self) -> str:
-      return json.dumps({"status": "error", "message": "Manual CSV export is removed. Session processing is automatic."})
-   
+        with self._lock:
+            snapshot = list(self._data)
+            
+        if not snapshot:
+            return json.dumps({"status": "error", "message": "No data to export."})
+            
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"throughput_{ts}.csv"
+            
+            result = window.create_file_dialog(
+                webview.FileDialog.SAVE,
+                save_filename=default_name,
+                file_types=["CSV Files (*.csv)", "All files (*.*)"]
+            )
+            
+            if not result:
+                return json.dumps({"status": "cancelled", "message": "Export cancelled."})
+                
+            filepath = result if isinstance(result, str) else result[0]
+
+            rows = self._write_snapshot_csv(filepath)
+            self._last_exported_csv_path = filepath
+
+            return json.dumps({"status": "ok", "path": filepath, "rows": rows})
+            
+        except Exception as exc:
+            return json.dumps({"status": "error", "message": str(exc)})
 
     def get_summary(self) -> str:
       return json.dumps(self._build_summary())
 
     def js_error(self, message: str) -> str:
-      # Receive JS errors from the webview for debugging
       try:
         print("[JS ERROR]", message)
       except Exception:
         pass
       return json.dumps({"status": "ok"})
     
-# ─────────────────────────────────────────────
-#  Protocol
-# ─────────────────────────────────────────────   
     def _calculate_crc16(self, data: bytes | bytearray) -> int:
-        """Helper to calculate CRC16 for the ACK validation."""
         crc = 0xFFFF
         for byte in data:
             crc ^= (byte << 8)
@@ -676,32 +693,28 @@ class Api:
         return crc
     
     def _validate_ack(self, rx: bytes | bytearray, expected_chunk: int) -> tuple[bool, str]:
-        """Strict 12-byte ACK validation from the Flash Tool protocol."""
         if len(rx) != 12:
-            return False, f"Invalid Length (Got {len(rx)} bytes)"
+            return False, f"Invalid Frame Length"
         if rx[:3]  != b"\xFE\xFE\xFE":
-            return False, "[2] Error While Validating ACK (Start bytes)"
+            return False, "[1] Error While Validating ACK"
         if rx[9:]  != b"\xFE\xFE\xFE":
-            return False, "[3] Error While Validating ACK (End bytes)"
+            return False, "[2] Error While Validating ACK"
         if rx[3] != 0x41:
-            return False, "[4] Error While Validating ACK (Command byte)"
+            return False, "[3] Error While Validating ACK"
         if rx[6] != 0x00:
-            return False, "NACK sent by Controller"
+            return False, "Failed to Stop the Analysis Process"
 
         rx_chunk = (rx[4] << 8) | rx[5]
         rx_crc   = (rx[7] << 8) | rx[8]
         calc_crc = self._calculate_crc16(rx[3:7])
         
         if rx_crc != calc_crc:
-            return False, "[5] Error While Validating ACK (CRC Mismatch)"
+            return False, "[4] Error While Validating ACK"
         if rx_chunk != expected_chunk:
-            return False, f"[6] Error While Validating ACK (Expected chunk {expected_chunk})"
+            return False, f"[5] Error While Validating ACK"
             
         return True, "Valid"
 
-# ─────────────────────────────────────────────
-#  HTML front-end
-# ─────────────────────────────────────────────
 HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -712,7 +725,6 @@ HTML = r"""<!DOCTYPE html>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  /* Dark theme (default) */
   --bg-dark:  #0f1219;
   --bg-main:  #1a1f2e;
   --bg-card:  #252d3d;
@@ -736,7 +748,6 @@ HTML = r"""<!DOCTYPE html>
 }
 
 body.light-theme {
-  /* Light theme */
   --bg-dark:  #ffffff;
   --bg-main:  #ffffff;
   --bg-card:  #ffffff;
@@ -770,7 +781,6 @@ body {
   transition: all 0.3s ease;
 }
 
-/* Topbar */
 .topbar {
   height: 70px;
   background: linear-gradient(135deg, var(--surface) 0%, rgba(42, 50, 63, 0.6) 100%);
@@ -837,65 +847,6 @@ body.light-theme .topbar {
   letter-spacing: 0.5px;
 }
 
-.pill {
-  display: inline-flex; 
-  align-items: center; 
-  gap: 8px;
-  padding: 8px 16px; 
-  border-radius: 999px;
-  font-size: 12px; 
-  font-weight: 600;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  background: rgba(42, 50, 63, 0.5);
-  letter-spacing: 0.5px;
-  transition: all 0.3s ease;
-}
-.pill-dot { 
-  width: 8px; 
-  height: 8px; 
-  border-radius: 50%; 
-  background: var(--text-muted);
-}
-.pill.connected  { 
-  border-color: var(--green);
-  color: var(--green-light); 
-  background: rgba(16, 185, 129, 0.1);
-}
-.pill.connected .pill-dot { 
-  background: var(--green-light);
-  box-shadow: 0 0 8px var(--green);
-}
-.pill.running    { 
-  border-color: var(--blue);
-  color: var(--blue-light);  
-  background: rgba(59, 130, 246, 0.1);
-  animation: pulse-pill 2s ease-in-out infinite;
-}
-.pill.running .pill-dot  { 
-  background: var(--blue-light);
-  box-shadow: 0 0 12px var(--blue);
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-.pill.done       { 
-  border-color: var(--amber);
-  color: var(--amber); 
-  background: rgba(245, 158, 11, 0.1);
-}
-.pill.done .pill-dot     { 
-  background: var(--amber);
-  box-shadow: 0 0 8px var(--amber);
-}
-@keyframes pulse-pill { 
-  0%,100% { opacity: 1; } 
-  50% { opacity: 0.7; } 
-}
-@keyframes pulse-dot { 
-  0%,100% { box-shadow: 0 0 12px var(--blue); } 
-  50% { box-shadow: 0 0 20px var(--blue); } 
-}
-
-/* Theme toggle button */
 .theme-toggle {
   flex-shrink: 0;
   width: 40px;
@@ -932,7 +883,6 @@ body.light-theme .theme-toggle:hover {
   border-color: #3b82f6;
   color: #3b82f6;
 }
-
 .theme-icon {
   width: 18px;
   height: 18px;
@@ -987,16 +937,12 @@ body.light-theme .top-status {
   background: #f9fafb;
 }
 
-
-/* Layout */
 .layout { 
   display: flex; 
   flex: 1; 
   overflow: hidden; 
-  # flex-direction: row-reverse;
 }
 
-/* Right Control Panel */
 .control-panel {
   width: 300px;
   flex-shrink: 0;
@@ -1014,7 +960,6 @@ body.light-theme .control-panel {
   border-left-color: #d1d5db;
 }
 
-/* Control rows */
 .ctrl-row {
   display: flex;
   gap: 8px;
@@ -1035,7 +980,6 @@ body.light-theme .control-panel {
   margin-top: 4px;
 }
 
-/* Icon-only buttons */
 .btn-icon {
   width: 38px;
   height: 38px;
@@ -1080,7 +1024,6 @@ body.light-theme .btn-icon:hover {
   border-color: #3b82f6;
 }
 
-/* Action buttons row */
 .btn-action {
   flex: 1;
   height: 36px;
@@ -1176,7 +1119,6 @@ body.light-theme .btn-icon:hover {
   transform: translateY(-1px);
 }
 
-/* Control section label */
 .ctrl-section {
   margin-top: 8px;
 }
@@ -1194,100 +1136,76 @@ body.light-theme .ctrl-section-title {
   color: #6b7280;
 }
 
-/* Metrics display */
-.metrics-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 6px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+/* ── Connection panel field labels ─────────────────── */
+.conn-field {
+  margin-bottom: 12px;
 }
-
-.metric-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  transition: all 0.2s ease;
-}
-
-body.light-theme .metric-row {
-  background: #f9fafb;
-  border-color: #e5e7eb;
-}
-
-.metric-row:hover {
-  border-color: var(--border-lt);
-}
-
-.metric-label {
-  font-size: 11px;
+.conn-field-label {
+  font-size: 10px;
   font-weight: 600;
-  color: var(--text-muted);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  display: block;
+}
+body.light-theme .conn-field-label {
+  color: #6b7280;
 }
 
-.metric-value {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.metric-value.blown { color: var(--red-light); }
-.metric-value.avg { color: var(--green-light); }
-.metric-value.max { color: var(--amber); }
-.metric-value.frame { color: var(--blue-light); }
-
-body.light-theme .metric-value.blown { color: #dc2626; }
-body.light-theme .metric-value.avg { color: #059669; }
-body.light-theme .metric-value.max { color: #d97706; }
-body.light-theme .metric-value.frame { color: #2563eb; }
-
-/* Main content area */
-.main {
-  flex: 1;
-  min-width: 0;
+/* ── Full-width Connect button ─────────────────────── */
+.btn-connect {
+  width: 100%;
+  height: 42px;
+  border: none;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  box-shadow: 0 3px 12px rgba(16, 185, 129, 0.25);
+  margin-bottom: 10px;
+  letter-spacing: 0.01em;
+  position: relative;
   overflow: hidden;
 }
-
-/* Resizable log area */
-.log-container {
-  display: flex;
-  flex-direction: column;
-  height: 140px;
-  min-height: 120px;
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
+.btn-connect::before {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 100%; height: 100%;
+  background: rgba(255,255,255,0.12);
+  transition: left 0.3s ease;
+}
+.btn-connect:hover::before { left: 100%; }
+.btn-connect:hover {
+  box-shadow: 0 5px 18px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+}
+.btn-connect:active { transform: scale(0.98); }
+.btn-connect.disconnect-mode {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  box-shadow: 0 3px 12px rgba(239, 68, 68, 0.25);
+}
+.btn-connect.disconnect-mode:hover {
+  box-shadow: 0 5px 18px rgba(239, 68, 68, 0.4);
+}
+body.light-theme .btn-connect {
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  box-shadow: 0 3px 12px rgba(5, 150, 105, 0.25);
+}
+body.light-theme .btn-connect.disconnect-mode {
+  background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
 }
 
-.log-resizer {
-  width: 100%;
-  height: 4px;
-  background: var(--border);
-  cursor: ns-resize;
-  transition: background 0.2s ease;
-  flex-shrink: 0;
-}
 
-.log-resizer:hover {
-  background: var(--blue-light);
-}
-
-body.light-theme .log-resizer {
-  background: #d1d5db;
-}
-
-body.light-theme .log-resizer:hover {
-  background: #3b82f6;
-}
 
 select, input[type=text] {
   width: 100%;
@@ -1345,103 +1263,12 @@ body.light-theme input[type=text]:focus {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-.btn {
-  width: 100%; 
-  height: 38px;
-  border: 1px solid transparent; 
-  border-radius: 9px;
-  font-family: 'Inter', sans-serif; 
-  font-size: 13px; 
-  font-weight: 600;
-  cursor: pointer; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  gap: 8px;
-  transition: all .2s ease; 
-  margin-bottom: 6px; 
-  white-space: nowrap;
-  letter-spacing: 0.3px;
-  position: relative;
-  overflow: hidden;
-}
-.btn::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: rgba(255, 255, 255, 0.1);
-  transition: left 0.3s ease;
-}
-.btn:not(:disabled):hover::before {
-  left: 100%;
-}
-.btn svg { 
-  flex-shrink: 0; 
-  position: relative;
-  z-index: 1;
-}
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn:not(:disabled):active { transform: scale(.96); }
-.btn-blue    { 
-  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-light) 100%);
-  color: #fff;          
-  border-color: var(--blue);
-  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2);
-}
-.btn-blue:not(:disabled):hover    { 
-  box-shadow: 0 6px 25px rgba(59, 130, 246, 0.35);
-  transform: translateY(-1px);
-}
-.btn-ghost   { 
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--text-secondary);  
-  border-color: var(--border-lt);
-}
-.btn-ghost:not(:disabled):hover   { 
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--border);
-  color: var(--text-primary);
-}
-.btn-green   { 
-  background: linear-gradient(135deg, var(--green) 0%, var(--green-light) 100%);
-  color: #fff;  
-  border-color: var(--green);
-  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.2);
-}
-.btn-green:not(:disabled):hover   { 
-  box-shadow: 0 6px 25px rgba(16, 185, 129, 0.35);
-  transform: translateY(-1px);
-}
-.btn-red     { 
-  background: linear-gradient(135deg, var(--red) 0%, var(--red-light) 100%);
-  color: #fff;  
-  border-color: var(--red);
-  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.2);
-}
-.btn-red:not(:disabled):hover     { 
-  box-shadow: 0 6px 25px rgba(239, 68, 68, 0.35);
-  transform: translateY(-1px);
-}
-.btn-purple  { 
-  background: linear-gradient(135deg, var(--purple) 0%, var(--cyan) 100%);
-  color: #fff; 
-  border-color: var(--purple);
-  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.2);
-}
-.btn-purple:not(:disabled):hover  { 
-  box-shadow: 0 6px 25px rgba(139, 92, 246, 0.35);
-  transform: translateY(-1px);
-}
 .hr { 
   height: 1px; 
   background: linear-gradient(90deg, transparent, var(--border), transparent);
   margin: 8px 0 4px; 
 }
 
-/* Main */
 .main { 
   flex: 1; 
   min-width: 0; 
@@ -1450,7 +1277,6 @@ body.light-theme input[type=text]:focus {
   overflow: hidden; 
 }
 
-/* Stats row — 4 cards */
 .stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1522,14 +1348,7 @@ body.light-theme .scard::before {
   margin-top: 6px; 
   letter-spacing: 0.5px;
 }
-.scard-sub  { 
-  font-size: 10px; 
-  color: var(--text-muted); 
-  margin-top: 4px; 
-  font-family: 'JetBrains Mono', monospace; 
-}
 
-/* Chart area */
 .chart-area {
   flex: 1; 
   min-height: 0;
@@ -1602,130 +1421,6 @@ body.light-theme .chart-box {
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-/* Log */
-.log {
-  flex: 1;
-  min-height: 0;
-  border-top: 1px solid var(--border);
-  background: linear-gradient(135deg, var(--surface) 0%, rgba(42, 50, 63, 0.6) 100%);
-  display: flex; 
-  flex-direction: column;
-}
-
-body.light-theme .log {
-  background: #ffffff;
-}
-.log-hdr {
-  padding: 10px 18px; 
-  border-bottom: 1px solid var(--border);
-  font-size: 11px; 
-  font-weight: 700; 
-  letter-spacing: .1em;
-  text-transform: uppercase; 
-  color: var(--text-muted); 
-  flex-shrink: 0;
-}
-.log-body { 
-  flex: 1; 
-  overflow-y: auto; 
-  padding: 8px 18px 10px;
-}
-.log-entry {
-  font-family: 'JetBrains Mono', monospace; 
-  font-size: 12px;
-  line-height: 1.8; 
-  color: var(--text-muted);
-  padding-left: 12px; 
-  border-left: 3px solid transparent;
-  transition: all 0.2s ease;
-  margin-bottom: 2px;
-}
-.log-entry:hover {
-  color: var(--text-primary);
-  # padding-left: 14px;
-}
-.log-entry.ok   { 
-  color: var(--green-light); 
-  border-color: var(--green);
-}
-.log-entry.err  { 
-  color: var(--red-light);   
-  border-color: var(--red);
-}
-.log-entry.info { 
-  color: var(--blue-light);  
-  border-color: var(--blue);
-}
-.log-entry.warn { 
-  color: var(--amber); 
-  border-color: var(--amber);
-}
-
-body.light-theme .log-entry {
-  color: #6b7280;
-}
-
-body.light-theme .log-entry.ok { 
-  color: #059669; 
-  border-color: #10b981;
-}
-
-body.light-theme .log-entry.err { 
-  color: #dc2626;   
-  border-color: #dc2626;
-}
-
-body.light-theme .log-entry.info { 
-  color: #2563eb;  
-  border-color: #2563eb;
-}
-
-body.light-theme .log-entry.warn { 
-  color: #d97706; 
-  border-color: #d97706;
-}
-
-/* Toast */
-#toast {
-  position: fixed; 
-  bottom: 24px; 
-  right: 24px;
-  background: linear-gradient(135deg, var(--bg-dark) 0%, var(--surface) 100%);
-  color: var(--text-primary); 
-  font-size: 13px; 
-  font-weight: 600;
-  padding: 14px 20px; 
-  border-radius: var(--r);
-  opacity: 0; 
-  transform: translateY(8px) scale(0.95);
-  transition: all .3s cubic-bezier(.16,1,.3,1);
-  pointer-events: none; 
-  z-index: 9999;
-  max-width: 380px; 
-  line-height: 1.5;
-  border: 1px solid var(--border);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  letter-spacing: 0.3px;
-}
-#toast.success { 
-  background: linear-gradient(135deg, var(--green) 0%, var(--green-light) 100%);
-  color: #fff;
-  border-color: transparent;
-  box-shadow: 0 8px 32px rgba(16, 185, 129, 0.25);
-}
-#toast.show    { 
-  opacity: 1; 
-  transform: translateY(0) scale(1); 
-  pointer-events: auto;
-}
-
-body.light-theme #toast {
-  background: #1f2937;
-  color: #ffffff;
-  border-color: #374151;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-}
-
 /* Modal */
 .modal-backdrop {
   position: fixed;
@@ -1741,69 +1436,97 @@ body.light-theme #toast {
 .modal-backdrop.show {
   display: flex;
 }
-.modal-card {
-  width: min(420px, 100%);
-  border-radius: 18px;
-  border: 1px solid var(--border);
+
+/* Alert overlay */
+.alert-overlay {
+  position: fixed; inset: 0; z-index: 20000;
+  background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(4px);
+  display: none; align-items: center; justify-content: center;
+}
+.alert-overlay.show { display: flex; }
+.alert-card {
   background: linear-gradient(180deg, var(--surface) 0%, var(--bg-dark) 100%);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
-  padding: 24px;
-  text-align: center;
-  position: relative;
+  border: 1px solid var(--border); border-radius: 16px;
+  padding: 30px 34px; min-width: 320px; max-width: 460px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.45); animation: slideUp 0.22s ease;
 }
-.modal-title {
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-bottom: 12px;
+body.light-theme .alert-card {
+  background: #ffffff; border-color: #d1d5db;
 }
-.modal-message {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-  line-height: 1.4;
-  margin-bottom: 20px;
+.alert-hdr { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.alert-ico {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 700; flex-shrink: 0;
 }
-.modal-close {
-  border: none;
-  border-radius: 10px;
-  height: 40px;
-  padding: 0 18px;
-  min-width: 96px;
-  cursor: pointer;
-  font-weight: 700;
-  color: #fff;
-  background: linear-gradient(135deg, var(--blue) 0%, var(--green) 100%);
-  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.25);
+.alert-ico.error { background: rgba(239, 68, 68, 0.15); color: var(--red-light); }
+.alert-ico.warning { background: rgba(245, 158, 11, 0.15); color: var(--amber); }
+.alert-ico.success { background: rgba(16, 185, 129, 0.15); color: var(--green-light); }
+.alert-ico.info { background: rgba(59, 130, 246, 0.15); color: var(--blue-light); }
+
+body.light-theme .alert-ico.error { background: rgba(220, 38, 38, 0.1); color: #dc2626; }
+body.light-theme .alert-ico.warning { background: rgba(217, 119, 6, 0.1); color: #d97706; }
+body.light-theme .alert-ico.success { background: rgba(5, 150, 105, 0.1); color: #059669; }
+body.light-theme .alert-ico.info { background: rgba(37, 99, 235, 0.1); color: #2563eb; }
+
+.alert-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+body.light-theme .alert-title { color: #111827; }
+.alert-body {
+  font-size: 13px; color: var(--text-secondary); line-height: 1.65;
+  margin-bottom: 22px; padding-left: 48px; word-break: break-word;
 }
-.modal-close:hover {
-  transform: translateY(-1px);
+body.light-theme .alert-body { color: #4b5563; }
+.alert-ok {
+  width: 100%; padding: 11px; border: none; border-radius: 8px;
+  font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: background 0.2s ease; color: #fff;
+}
+.alert-ok.error { background: linear-gradient(135deg, var(--red) 0%, var(--red-light) 100%); }
+.alert-ok.warning { background: linear-gradient(135deg, var(--amber) 0%, #fcd34d 100%); }
+.alert-ok.success { background: linear-gradient(135deg, var(--green) 0%, var(--green-light) 100%); }
+.alert-ok.info { background: linear-gradient(135deg, var(--blue) 0%, var(--blue-light) 100%); }
+
+body.light-theme .alert-ok.error { background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); }
+body.light-theme .alert-ok.warning { background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%); }
+body.light-theme .alert-ok.success { background: linear-gradient(135deg, #059669 0%, #10b981 100%); }
+body.light-theme .alert-ok.info { background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%); }
+
+@keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Loading Overlay */
+.loading-overlay {
+  position: fixed; inset: 0; z-index: 30000;
+  background: rgba(7, 10, 18, 0.75); backdrop-filter: blur(6px);
+  display: none; align-items: center; justify-content: center;
+}
+.loading-overlay.show { display: flex; }
+
+.loading-card {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-dark) 100%);
+  border: 1px solid var(--border); border-radius: 16px;
+  padding: 36px 48px; display: flex; flex-direction: column; align-items: center; gap: 20px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6); animation: slideUp 0.2s ease;
+}
+body.light-theme .loading-card {
+  background: #ffffff; border-color: #d1d5db;
 }
 
-body.light-theme .modal-card {
-  background: #ffffff;
-  border-color: #d1d5db;
+.spinner {
+  width: 44px; height: 44px;
+  border: 4px solid rgba(59, 130, 246, 0.15);
+  border-top-color: var(--blue-light);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
+body.light-theme .spinner {
+  border-color: rgba(37, 99, 235, 0.15); border-top-color: #3b82f6;
+}
+.loading-text {
+  font-size: 15px; font-weight: 600; color: var(--text-primary); letter-spacing: 0.3px;
+}
+body.light-theme .loading-text { color: #111827; }
 
-body.light-theme .modal-title {
-  color: #6b7280;
-}
-
-body.light-theme .modal-message {
-  color: #111827;
-}
-
-body.light-theme .modal-close {
-  background: linear-gradient(135deg, #2563eb 0%, #059669 100%);
-  color: #ffffff;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
-}
-
-body.light-theme .modal-close:hover {
-  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.3);
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Metric Detail Modal Styles */
 .metric-modal-card {
@@ -2025,22 +1748,6 @@ body.light-theme .sort-header:hover {
   background: rgba(37, 99, 235, 0.12);
 }
 
-.metric-formula {
-  background: rgba(0, 0, 0, 0.2);
-  padding: 10px;
-  border-radius: 6px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--green-light);
-  margin-top: 8px;
-  line-height: 1.4;
-}
-
-body.light-theme .metric-formula {
-  background: #f0fdf4;
-  color: #059669;
-}
-
 /* Close button for metric modals */
 .metric-modal-close-btn {
   position: absolute;
@@ -2080,31 +1787,24 @@ body.light-theme .metric-modal-close-btn:hover {
   background: rgba(37, 99, 235, 0.15);
 }
 
-/* Focus Styles for Accessibility */
-.modal-close:focus,
 .metric-modal-close-btn:focus {
   outline: 2px solid var(--blue-light);
   outline-offset: 2px;
   border-radius: 8px;
 }
 
-body.light-theme .modal-close:focus,
 body.light-theme .metric-modal-close-btn:focus {
   outline: 2px solid #2563eb;
 }
 
-/* Visible focus indicator for all focusable elements within modals */
-.modal-card:focus-within,
 .metric-modal-card:focus-within {
   box-shadow: inset 0 0 0 1px var(--blue-light);
 }
 
-body.light-theme .modal-card:focus-within,
 body.light-theme .metric-modal-card:focus-within {
   box-shadow: inset 0 0 0 1px #2563eb;
 }
 
-/* Enhanced button focus states */
 button:focus-visible {
   outline: 2px solid var(--blue-light);
   outline-offset: 2px;
@@ -2115,7 +1815,6 @@ body.light-theme button:focus-visible {
   outline: 2px solid #2563eb;
 }
 
-/* Make stat cards clickable */
 .scard {
   cursor: pointer;
 }
@@ -2143,7 +1842,6 @@ body.light-theme button:focus-visible {
   opacity: 0.5;
 }
 
-/* Light theme scrollbar for metric modal */
 body.light-theme .metric-modal-card::-webkit-scrollbar {
   width: 6px;
 }
@@ -2161,7 +1859,6 @@ body.light-theme .metric-modal-card::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
 }
 
-/* Light theme button styles */
 body.light-theme .btn-action {
   border: 1px solid transparent;
 }
@@ -2216,107 +1913,6 @@ body.light-theme .btn-action.download:not(:disabled):hover {
   box-shadow: 0 4px 16px rgba(5, 150, 105, 0.3);
 }
 
-body.light-theme .btn {
-  transition: all .2s ease;
-}
-
-body.light-theme .btn-blue {
-  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
-  color: #ffffff;
-  border-color: #2563eb;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
-}
-
-body.light-theme .btn-blue:not(:disabled):hover {
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3);
-}
-
-body.light-theme .btn-ghost {
-  background: #f3f4f6;
-  color: #374151;
-  border-color: #d1d5db;
-}
-
-body.light-theme .btn-ghost:not(:disabled):hover {
-  background: #e5e7eb;
-  border-color: #9ca3af;
-  color: #111827;
-}
-
-body.light-theme .btn-green {
-  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-  color: #ffffff;
-  border-color: #059669;
-  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.2);
-}
-
-body.light-theme .btn-green:not(:disabled):hover {
-  box-shadow: 0 4px 16px rgba(5, 150, 105, 0.3);
-}
-
-body.light-theme .btn-red {
-  background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
-  color: #ffffff;
-  border-color: #dc2626;
-  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.2);
-}
-
-body.light-theme .btn-red:not(:disabled):hover {
-  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3);
-}
-
-body.light-theme .btn-purple {
-  background: linear-gradient(135deg, #7c3aed 0%, #0891b2 100%);
-  color: #ffffff;
-  border-color: #7c3aed;
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);
-}
-
-body.light-theme .btn-purple:not(:disabled):hover {
-  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.3);
-}
-
-/* Light theme pill styles */
-body.light-theme .pill {
-  background: #f3f4f6;
-  border-color: #d1d5db;
-  color: #374151;
-}
-
-body.light-theme .pill.connected {
-  border-color: #10b981;
-  color: #059669;
-  background: rgba(5, 150, 105, 0.08);
-}
-
-body.light-theme .pill.connected .pill-dot {
-  background: #10b981;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
-}
-
-body.light-theme .pill.running {
-  border-color: #3b82f6;
-  color: #2563eb;
-  background: rgba(37, 99, 235, 0.08);
-}
-
-body.light-theme .pill.running .pill-dot {
-  background: #3b82f6;
-  box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
-}
-
-body.light-theme .pill.done {
-  border-color: #f59e0b;
-  color: #d97706;
-  background: rgba(217, 119, 6, 0.08);
-}
-
-body.light-theme .pill.done .pill-dot {
-  background: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.2);
-}
-
-/* Light theme status styles */
 body.light-theme .top-status.disconnected {
   color: #dc2626;
   border-color: rgba(220, 38, 38, 0.3);
@@ -2328,7 +1924,6 @@ body.light-theme .top-status.disconnected .top-status-dot {
   box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
 }
 
-/* Light theme chart area */
 body.light-theme .chart-hdr {
   color: #111827;
 }
@@ -2342,23 +1937,11 @@ body.light-theme .leg-item {
   color: #6b7280;
 }
 
-/* Light theme log area */
-body.light-theme .log-hdr {
-  color: #6b7280;
-  border-bottom-color: #d1d5db;
-}
-
-body.light-theme .log-body {
-  background: #ffffff;
-}
-
-/* Light theme for scard hover */
 body.light-theme .scard:hover {
   border-color: #bfdbfe;
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
 }
 
-/* Light theme scrollbar */
 body.light-theme ::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -2372,12 +1955,10 @@ body.light-theme ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
 }
 
-/* Light theme hr divider */
 body.light-theme .hr {
   background: linear-gradient(90deg, transparent, #d1d5db, transparent);
 }
 
-/* Light theme modal backdrop */
 body.light-theme .modal-backdrop {
   background: rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(8px);
@@ -2398,9 +1979,271 @@ body.light-theme .modal-backdrop {
   background: var(--border);
 }
 
-/* Inline analysis detail should occupy the same area as the chart */
+/* ── Dashboard Panel Styles ──────────────────────────────────── */
+.dash-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.dash-kpi {
+  background: rgba(0,0,0,0.18);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s ease;
+}
+.dash-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  border-radius: 10px 10px 0 0;
+}
+.dash-kpi.c-red::before    { background: linear-gradient(90deg, var(--red), var(--red-light)); }
+.dash-kpi.c-green::before  { background: linear-gradient(90deg, var(--green), var(--green-light)); }
+.dash-kpi.c-amber::before  { background: linear-gradient(90deg, var(--amber), #fcd34d); }
+.dash-kpi.c-blue::before   { background: linear-gradient(90deg, var(--blue), var(--blue-light)); }
+.dash-kpi.c-purple::before { background: linear-gradient(90deg, var(--purple), var(--cyan)); }
+
+body.light-theme .dash-kpi {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+.dash-kpi-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+body.light-theme .dash-kpi-lbl { color: #6b7280; }
+.dash-kpi-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+body.light-theme .dash-kpi-val { color: #111827; }
+.dash-kpi-val.c-red    { color: var(--red-light); }
+.dash-kpi-val.c-green  { color: var(--green-light); }
+.dash-kpi-val.c-amber  { color: var(--amber); }
+.dash-kpi-val.c-blue   { color: var(--blue-light); }
+.dash-kpi-val.c-purple { color: var(--purple); }
+.dash-kpi-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+body.light-theme .dash-kpi-sub { color: #9ca3af; }
+
+.dash-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+.dash-badge.excellent { background: rgba(16,185,129,0.15); color: var(--green-light); }
+.dash-badge.good      { background: rgba(59,130,246,0.15); color: var(--blue-light); }
+.dash-badge.moderate  { background: rgba(245,158,11,0.15); color: var(--amber); }
+.dash-badge.critical  { background: rgba(239,68,68,0.15);  color: var(--red-light); }
+
+body.light-theme .dash-badge.excellent { background: rgba(5,150,105,0.12);  color: #059669; }
+body.light-theme .dash-badge.good      { background: rgba(37,99,235,0.12);  color: #2563eb; }
+body.light-theme .dash-badge.moderate  { background: rgba(217,119,6,0.12);  color: #d97706; }
+body.light-theme .dash-badge.critical  { background: rgba(220,38,38,0.12);  color: #dc2626; }
+
+.dash-section {
+  background: rgba(0,0,0,0.12);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+body.light-theme .dash-section {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+.dash-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+body.light-theme .dash-section-title { color: #6b7280; }
+.dash-section-title .live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green-light);
+  box-shadow: 0 0 0 2px rgba(52,211,153,0.2);
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(52,211,153,0.2); }
+  50%       { box-shadow: 0 0 0 5px rgba(52,211,153,0.08); }
+}
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.dash-table th {
+  background: rgba(59,130,246,0.07);
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--blue-light);
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+body.light-theme .dash-table th {
+  background: #eff6ff;
+  color: #2563eb;
+  border-bottom-color: #dbeafe;
+}
+.dash-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.dash-table th.sortable:hover { background: rgba(59,130,246,0.14); }
+body.light-theme .dash-table th.sortable:hover { background: #dbeafe; }
+.dash-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  vertical-align: middle;
+}
+body.light-theme .dash-table td {
+  border-bottom-color: #f3f4f6;
+  color: #374151;
+}
+.dash-table tr:last-child td { border-bottom: none; }
+.dash-table tr:hover td { background: rgba(59,130,246,0.04); }
+body.light-theme .dash-table tr:hover td { background: #f0f9ff; }
+
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.rank-badge.r1 { background: rgba(245,158,11,0.25); color: #fcd34d; }
+.rank-badge.r2 { background: rgba(148,163,184,0.18); color: #cbd5e1; }
+.rank-badge.r3 { background: rgba(180,125,90,0.2); color: #c4956a; }
+.rank-badge.rn { background: rgba(59,130,246,0.12); color: var(--blue-light); }
+
+body.light-theme .rank-badge.r1 { background: rgba(245,158,11,0.18); color: #d97706; }
+body.light-theme .rank-badge.r2 { background: rgba(100,116,139,0.15); color: #475569; }
+body.light-theme .rank-badge.r3 { background: rgba(120,80,50,0.12);  color: #78502a; }
+body.light-theme .rank-badge.rn { background: rgba(37,99,235,0.1);   color: #2563eb; }
+
+.time-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 90px;
+}
+.time-bar-bg {
+  flex: 1;
+  height: 5px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+body.light-theme .time-bar-bg { background: #e5e7eb; }
+.time-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.time-bar-fill.blown { background: linear-gradient(90deg, var(--red), var(--red-light)); }
+.time-bar-fill.ok    { background: linear-gradient(90deg, var(--blue), var(--blue-light)); }
+.time-bar-fill.peak  { background: linear-gradient(90deg, var(--amber), #fcd34d); }
+
+.blown-status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.blown-status-dot.blown { background: var(--red-light); }
+.blown-status-dot.ok    { background: var(--green-light); }
+
+.avg-canvas-wrap {
+  width: 100%;
+  height: 90px;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.15);
+}
+body.light-theme .avg-canvas-wrap { background: #f3f4f6; }
+canvas.avg-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.dash-hero-frame {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  background: rgba(59,130,246,0.07);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 12px;
+  margin-bottom: 2px;
+}
+body.light-theme .dash-hero-frame {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+.dash-hero-frame-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+.dash-hero-frame-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--blue-light);
+  line-height: 1;
+}
+body.light-theme .dash-hero-frame-num { color: #2563eb; }
+.dash-hero-frame-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+body.light-theme .dash-hero-frame-label { color: #6b7280; }
+
 #analysisDetail {
-  display: none; /* toggled by JS */
+  display: none;
   flex: 1;
   min-height: 0;
   width: 100%;
@@ -2425,7 +2268,7 @@ body.light-theme .modal-backdrop {
 #analysisDetail .metric-modal-header {
   margin-bottom: 0;
   padding-bottom: 14px;
-  border-bottom: none; /* removed divider */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 body.light-theme #analysisDetail .metric-modal-card {
@@ -2435,7 +2278,7 @@ body.light-theme #analysisDetail .metric-modal-card {
 }
 
 body.light-theme #analysisDetail .metric-modal-header {
-  border-bottom: none; /* removed divider for light theme */
+  border-bottom-color: #e5e7eb;
 }
 
 #analysisDetail .metric-detail-section {
@@ -2471,33 +2314,12 @@ body.light-theme #analysisDetail .metric-detail-section {
 #analysisDetail .metric-modal-subtitle {
   font-size: 12px;
 }
-
-/* Two-column layout inside analysis detail: summary (left) and content/table (right) */
-#analysisDetail .metric-modal-content {
-  display: flex;
-  gap: 18px;
-  align-items: flex-start;
-}
-#analysisDetail .metric-detail-column {
-  flex: 1 1 0;
-  min-width: 0;
-}
-#analysisDetail .metric-detail-column.right {
-  overflow: auto;
-}
-/* Stack columns on narrow screens */
-@media (max-width: 800px) {
-  #analysisDetail .metric-modal-content {
-    flex-direction: column;
-  }
-}
 </style>
 </head>
 <body>
 
 <div class="topbar">
   <div class="brand">
-    <!-- Logo mark -->
     <div class="logo-mark">
       <svg viewBox="0 0 38 38" xmlns="http://www.w3.org/2000/svg">
         <defs>
@@ -2506,19 +2328,15 @@ body.light-theme #analysisDetail .metric-detail-section {
             <stop offset="100%" stop-color="#6c3aed"/>
           </linearGradient>
         </defs>
-        <!-- Background rounded rect -->
         <rect width="38" height="38" rx="9" fill="url(#lg1)"/>
-        <!-- Waveform / throughput bars -->
         <rect x="5"  y="22" width="4" height="11" rx="1.5" fill="rgba(255,255,255,0.5)"/>
         <rect x="11" y="16" width="4" height="17" rx="1.5" fill="rgba(255,255,255,0.7)"/>
         <rect x="17" y="10" width="4" height="23" rx="1.5" fill="rgba(255,255,255,0.9)"/>
         <rect x="23" y="14" width="4" height="19" rx="1.5" fill="rgba(255,255,255,0.75)"/>
         <rect x="29" y="19" width="4" height="14" rx="1.5" fill="rgba(255,255,255,0.55)"/>
-        <!-- Trend line over bars -->
         <polyline points="7,20 13,14 19,8 25,12 31,17"
                   fill="none" stroke="#fff" stroke-width="1.8"
                   stroke-linecap="round" stroke-linejoin="round"/>
-        <!-- Dot on peak -->
         <circle cx="19" cy="8" r="2.2" fill="#fff"/>
       </svg>
     </div>
@@ -2544,15 +2362,9 @@ body.light-theme #analysisDetail .metric-detail-section {
         <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
         <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
       </svg>
-      <svg class="theme-icon" id="moonIcon" viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        style="display:none;">
-      <path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5A7 7 0 0 0 20.5 14.5Z"/>
-    </svg>
+      <svg class="theme-icon" id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+      </svg>
     </button>
   </div>
 </div>
@@ -2593,155 +2405,236 @@ body.light-theme #analysisDetail .metric-detail-section {
       </div>
       <div id="chartView" class="chart-box"><canvas id="chart"></canvas></div>
       <div id="analysisDetail" style="display: none;">
-        <!-- Inline Frames Blown detail -->
+
+        <!-- ══ 1. FRAMES BLOWN DASHBOARD ══════════════════════════════ -->
         <div class="metric-modal-card" id="inline_frameBlown" style="display:none;">
-            <div class="metric-modal-header">
-              <div class="metric-modal-icon">⚠️</div>
-              <div>
-                <div class="metric-modal-title" id="inline_blownModalTitle">Frames Blown</div>
-                <div class="metric-modal-subtitle">Threshold Exceedance Analysis</div>
-              </div>
-            </div>
-            <div class="metric-modal-content">
-              <div class="metric-detail-column left">
-                <div class="metric-detail-section">
-                  <div class="metric-detail-label">Percentage of Total Frames</div>
-                  <div class="metric-detail-value" id="inline_blownPercent">—</div>
-                </div>
-              </div>
-              <div class="metric-detail-column right">
-                <div class="metric-detail-section">
-                  <div class="metric-detail-label" id="inline_blownFramesCountLabel">All Blown Frames</div>
-                  <table class="metric-table">
-                    <thead>
-                      <tr>
-                        <th>Rank</th>
-                        <th>Frame #</th>
-                        <th>Time (µs)</th>
-                      </tr>
-                    </thead>
-                    <tbody id="inline_blownFramesList"></tbody>
-                  </table>
-                </div>
-              </div>
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">⚠️</div>
+            <div style="flex:1;">
+              <div class="metric-modal-title" id="inline_blownModalTitle">Frames Blown</div>
+              <div class="metric-modal-subtitle">Real-time Threshold Exceedance Monitor</div>
             </div>
           </div>
 
-        <!-- Inline Average Time detail -->
+          <!-- KPI strip -->
+          <div class="dash-hero-grid">
+            <div class="dash-kpi c-red">
+              <div class="dash-kpi-lbl">Total Blown</div>
+              <div class="dash-kpi-val c-red" id="ib_totalBlown">—</div>
+              <div class="dash-kpi-sub">frames > 2000 µs</div>
+            </div>
+            <div class="dash-kpi c-amber">
+              <div class="dash-kpi-lbl">% of Frames</div>
+              <div class="dash-kpi-val c-amber" id="ib_blownPct">—</div>
+              <div class="dash-kpi-sub">exceedance rate</div>
+            </div>
+            <div class="dash-kpi c-purple">
+              <div class="dash-kpi-lbl">Last Blown</div>
+              <div class="dash-kpi-val c-purple" id="ib_lastBlownSec">—</div>
+              <div class="dash-kpi-sub">second of session</div>
+            </div>
+          </div>
+
+          <!-- Live table -->
+          <div class="dash-section">
+            <div class="dash-section-title">
+              <span class="live-dot"></span>
+              All Blown Frames — <span id="ib_blownCount">0</span> total
+              <span style="margin-left:auto; display:flex; gap:6px;">
+                <button onclick="app.sortBlownInline('frameIndex')" id="ib_sortFrameBtn"
+                  style="background:rgba(59,130,246,0.1);border:1px solid var(--border);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--text-secondary);cursor:pointer;">Frame #</button>
+                <button onclick="app.sortBlownInline('second')" id="ib_sortSecBtn"
+                  style="background:rgba(59,130,246,0.1);border:1px solid var(--border);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--text-secondary);cursor:pointer;">Second</button>
+                <button onclick="app.sortBlownInline('timeUs')" id="ib_sortTimeBtn"
+                  style="background:rgba(59,130,246,0.15);border:1px solid var(--blue);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--blue-light);cursor:pointer;">Time ▼</button>
+              </span>
+            </div>
+            <table class="dash-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Second</th>
+                  <th>Time (µs)</th>
+                  <th>Severity</th>
+                </tr>
+              </thead>
+              <tbody id="ib_blownBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ══ 2. AVERAGE TIME DASHBOARD ═══════════════════════════════ -->
         <div class="metric-modal-card" id="inline_avgTime" style="display:none;">
           <div class="metric-modal-header">
             <div class="metric-modal-icon">📊</div>
-            <div>
-              <div class="metric-modal-title" id="inline_avgTimeModalTitle">Average Time</div>
-              <div class="metric-modal-subtitle">Mean Processing Latency</div>
+            <div style="flex:1;">
+              <div class="metric-modal-title">Average Time</div>
+              <div class="metric-modal-subtitle">Mean Processing Latency — Live per-Frame Analysis</div>
             </div>
           </div>
-          <div class="metric-modal-content">
-            <div class="metric-detail-column left">
-              <div class="metric-detail-section">
-                <div class="metric-detail-label">Average Value</div>
-                <div class="metric-detail-value" id="inline_avgValue">—</div>
-              </div>
-              <div class="metric-detail-section">
-                <div class="metric-detail-label">Interpretation</div>
-                <div class="metric-detail-value" style="font-size: 12px; font-weight: 400;" id="inline_avgInterpretation">—</div>
-              </div>
+
+          <!-- KPI strip -->
+          <div class="dash-hero-grid">
+            <div class="dash-kpi c-green">
+              <div class="dash-kpi-lbl">Overall Average</div>
+              <div class="dash-kpi-val c-green" id="ib_avgOverall">—</div>
+              <div class="dash-kpi-sub">µs across all frames</div>
             </div>
-            <div class="metric-detail-column right">
-              <div class="metric-detail-section">
-                <div class="metric-detail-label">Summary</div>
-                <div class="metric-detail-row">
-                  <span class="metric-detail-row-label">Total Accumulated Time</span>
-                  <span class="metric-detail-row-value" id="inline_avgTotalTime">—</span>
-                </div>
-                <div class="metric-detail-row">
-                  <span class="metric-detail-row-label">Number of Frames</span>
-                  <span class="metric-detail-row-value" id="inline_avgFrameCount">—</span>
-                </div>
-              </div>
+            <div class="dash-kpi c-blue">
+              <div class="dash-kpi-lbl">Frame Count</div>
+              <div class="dash-kpi-val c-blue" id="ib_avgFrameCount">—</div>
+              <div class="dash-kpi-sub">total samples seen</div>
             </div>
+            <div class="dash-kpi c-purple">
+              <div class="dash-kpi-lbl">Status</div>
+              <div id="ib_avgBadge" class="dash-badge excellent" style="margin-top:6px;">Excellent</div>
+            </div>
+          </div>
+
+          <!-- Per-frame sparkline -->
+          <div class="dash-section">
+            <div class="dash-section-title">
+              <span class="live-dot"></span>
+              Per-Frame Average (0 → 499)
+            </div>
+            <div class="avg-canvas-wrap">
+              <canvas class="avg-canvas" id="ib_avgCanvas"></canvas>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:4px;">
+              <span style="font-size:9px;color:var(--text-muted);">Frame 0</span>
+              <span style="font-size:9px;color:var(--text-muted);text-align:center;">--- 2000 µs threshold ---</span>
+              <span style="font-size:9px;color:var(--text-muted);">Frame 499</span>
+            </div>
+          </div>
+
+          <!-- Top 10 highest average frames -->
+          <div class="dash-section">
+            <div class="dash-section-title">Top 10 Highest-Average Frames</div>
+            <table class="dash-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Avg Time (µs)</th>
+                  <th>vs Overall</th>
+                  <th>Bar</th>
+                </tr>
+              </thead>
+              <tbody id="ib_avgTopBody"></tbody>
+            </table>
           </div>
         </div>
 
-        <!-- Inline Max Time detail -->
+        <!-- ══ 3. MAX TIME DASHBOARD ════════════════════════════════════ -->
         <div class="metric-modal-card" id="inline_maxTime" style="display:none;">
           <div class="metric-modal-header">
             <div class="metric-modal-icon">⏱️</div>
-            <div>
-              <div class="metric-modal-title" id="inline_maxTimeModalTitle">Maximum Time</div>
-              <div class="metric-modal-subtitle">Peak Processing Latency</div>
+            <div style="flex:1;">
+              <div class="metric-modal-title">Maximum Time</div>
+              <div class="metric-modal-subtitle">Peak Latency Tracker — Top 10 All-Time Highs</div>
             </div>
           </div>
-          <div class="metric-modal-content">
-            <div class="metric-detail-column left">
-              <div class="metric-detail-section">
-                <div class="metric-detail-label">Peak Value</div>
-                <div class="metric-detail-value" id="inline_maxValue">—</div>
-              </div>
-              <div class="metric-detail-section">
-                <div class="metric-detail-row">
-                  <span class="metric-detail-row-label">Exceeds Threshold by</span>
-                  <span class="metric-detail-row-value" id="inline_maxExceedance">—</span>
-                </div>
-                <div class="metric-detail-row">
-                  <span class="metric-detail-row-label">Peak Frame Index</span>
-                  <span class="metric-detail-row-value" id="inline_maxFrameIndex">—</span>
-                </div>
-              </div>
+
+          <!-- KPI strip -->
+          <div class="dash-hero-grid">
+            <div class="dash-kpi c-amber">
+              <div class="dash-kpi-lbl">Session Max</div>
+              <div class="dash-kpi-val c-amber" id="ib_maxValue">—</div>
+              <div class="dash-kpi-sub">µs — all-time peak</div>
             </div>
-            <div class="metric-detail-column right">
-              <div class="metric-detail-section">
-                <div class="metric-detail-label">Top 10 Highest Processing Times</div>
-                <table class="metric-table">
-                  <thead>
-                    <tr>
-                      <th>Rank</th>
-                      <th>Frame #</th>
-                      <th>Time (µs)</th>
-                      <th>Timestamp (s)</th>
-                    </tr>
-                  </thead>
-                  <tbody id="inline_maxFramesList"></tbody>
-                </table>
-              </div>
+            <div class="dash-kpi c-red">
+              <div class="dash-kpi-lbl">Over Threshold</div>
+              <div class="dash-kpi-val c-red" id="ib_maxExceed">—</div>
+              <div class="dash-kpi-sub">µs above 2000</div>
             </div>
+            <div class="dash-kpi c-blue">
+              <div class="dash-kpi-lbl">Reached at Second</div>
+              <div class="dash-kpi-val c-blue" id="ib_maxSecond">—</div>
+              <div class="dash-kpi-sub">session timestamp</div>
+            </div>
+          </div>
+
+          <!-- Top 10 table -->
+          <div class="dash-section">
+            <div class="dash-section-title">
+              <span class="live-dot"></span>
+              Top 10 Highest Processing Times
+            </div>
+            <table class="dash-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Second</th>
+                  <th>Time (µs)</th>
+                  <th>Severity Bar</th>
+                </tr>
+              </thead>
+              <tbody id="ib_maxBody"></tbody>
+            </table>
           </div>
         </div>
 
-        <!-- Inline Peak Frame detail -->
+        <!-- ══ 4. PEAK FRAME DASHBOARD ══════════════════════════════════ -->
         <div class="metric-modal-card" id="inline_peakFrame" style="display:none;">
           <div class="metric-modal-header">
             <div class="metric-modal-icon">🎯</div>
-            <div>
-              <div class="metric-modal-title" id="inline_peakFrameModalTitle">Peak Frame</div>
-              <div class="metric-modal-subtitle">Maximum Latency Frame Details</div>
+            <div style="flex:1;">
+              <div class="metric-modal-title">Peak Frame</div>
+              <div class="metric-modal-subtitle">Top 10 Frames by Maximum Processing Time</div>
             </div>
           </div>
-          <div class="metric-modal-content">
-            <div class="metric-detail-column left">
-              <div class="metric-detail-section">
-                <div class="metric-detail-label">Peak Frame Index</div>
-                <div class="metric-detail-value" id="inline_peakFrameNum">—</div>
-              </div>
-              <div class="metric-detail-section">
-                <div class="metric-detail-label">Peak Processing Time</div>
-                <div class="metric-detail-value" id="inline_peakFrameTime">—</div>
-              </div>
+
+          <!-- Hero frame card -->
+          <div class="dash-hero-frame">
+            <div class="dash-hero-frame-icon">🏆</div>
+            <div>
+              <div class="dash-hero-frame-num" id="ib_peakHeroNum">Frame —</div>
+              <div class="dash-hero-frame-label" id="ib_peakHeroTime">— µs — absolute session peak</div>
             </div>
-            <div class="metric-detail-column right">
-              <div class="metric-detail-section">
-                <div class="metric-detail-row">
-                  <span class="metric-detail-row-label">Exceeds Threshold</span>
-                  <span class="metric-detail-row-value" id="inline_peakFrameStatus">—</span>
-                </div>
-                <div class="metric-detail-row">
-                  <span class="metric-detail-row-label">Exceedance Margin</span>
-                  <span class="metric-detail-row-value" id="inline_peakFrameExceed">—</span>
-                </div>
-              </div>
+            <div style="margin-left:auto;" id="ib_peakHeroBadge"></div>
+          </div>
+
+          <!-- KPI strip -->
+          <div class="dash-hero-grid">
+            <div class="dash-kpi c-blue">
+              <div class="dash-kpi-lbl">Peak Frame #</div>
+              <div class="dash-kpi-val c-blue" id="ib_peakFrameNum">—</div>
+              <div class="dash-kpi-sub">index 0–499</div>
             </div>
+            <div class="dash-kpi c-amber">
+              <div class="dash-kpi-lbl">Peak Time</div>
+              <div class="dash-kpi-val c-amber" id="ib_peakFrameTime">—</div>
+              <div class="dash-kpi-sub">µs maximum</div>
+            </div>
+            <div class="dash-kpi c-red">
+              <div class="dash-kpi-lbl">Threshold Status</div>
+              <div id="ib_peakStatus" class="dash-badge critical" style="margin-top:6px;">⚠️ Blown</div>
+            </div>
+          </div>
+
+          <!-- Top 10 peak frames table -->
+          <div class="dash-section">
+            <div class="dash-section-title">
+              <span class="live-dot"></span>
+              Top 10 Peak Frames
+            </div>
+            <table class="dash-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Second</th>
+                  <th>Time (µs)</th>
+                  <th>Threshold</th>
+                </tr>
+              </thead>
+              <tbody id="ib_peakBody"></tbody>
+            </table>
           </div>
         </div>
+
       </div>
     </div>
   </div>
@@ -2751,62 +2644,62 @@ body.light-theme #analysisDetail .metric-detail-section {
     <!-- Connection Section -->
     <div class="ctrl-section">
       <span class="ctrl-section-title">Connection</span>
-      
-      <!-- Row 1: COM Port + Refresh -->
-      <div class="ctrl-row full">
-        <select id="portSel"><option value="">Select port…</option></select>
-        <button class="btn-icon" id="btnRefresh" title="Refresh ports" onclick="app.refreshPorts()">
-          <svg id="refreshIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M1 8a7 7 0 1 0 2-4.9"/>
-            <polyline points="1,3 1,8 6,8"/>
-          </svg>
-        </button>
+
+      <!-- COM Port field -->
+      <div class="conn-field">
+        <span class="conn-field-label">COM Port</span>
+        <div class="ctrl-row full">
+          <select id="portSel"><option value="">No ports found</option></select>
+          <button class="btn-icon" id="btnRefresh" title="Refresh ports" onclick="app.refreshPorts()">
+            <svg id="refreshIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 8a7 7 0 1 0 2-4.9"/>
+              <polyline points="1,3 1,8 6,8"/>
+            </svg>
+          </button>
+        </div>
       </div>
-      
-      <!-- Row 2: Baud Rate + Connect -->
-      <div class="ctrl-row full">
+
+      <!-- Baud Rate field -->
+      <div class="conn-field">
+        <span class="conn-field-label">Baud Rate</span>
         <select id="baudSel">
           <option>9600</option><option>19200</option><option>38400</option>
           <option selected>57600</option><option>115200</option>
           <option>230400</option><option>460800</option><option>921600</option>
         </select>
-        <button class="btn-icon" id="btnConn" onclick="app.toggleConnect()" title="Connect/Disconnect">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="11" r="2"/><circle cx="11" cy="5" r="2"/><line x1="6.5" y1="9.5" x2="9.5" y2="6.5"/></svg>
-        </button>
       </div>
+
+      <!-- Full-width Connect / Disconnect button -->
+      <button class="btn-connect" id="btnConn" onclick="app.toggleConnect()">Connect</button>
     </div>
 
     <!-- Analysis Section -->
     <div class="ctrl-section">
       <span class="ctrl-section-title">Analysis</span>
       
-      <div class="ctrl-row buttons">
-        <button class="btn-action start" id="btnStart" onclick="app.startAnalysis()" title="Start Analysis" disabled>
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+        <button class="btn-action start" id="btnStart" onclick="app.startAnalysis()" title="Start Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><polygon points="4,2 14,8 4,14"/></svg>
           Start
         </button>
-        <button class="btn-action stop" id="btnStop" onclick="app.stopAnalysis()" title="Stop Analysis" disabled>
+        
+        <button class="btn-action stop" id="btnStop" onclick="app.stopAnalysis()" title="Stop Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>
           Stop
         </button>
-        <button class="btn-action download" id="btnOpenSession" onclick="app.openSessionFolder()" title="Open Session Folder" disabled>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5h4l1.2 1.5H14v6.5H2z"/></svg>
-          Folder
+        
+        <div class="hr" style="margin: 4px 0; flex: none;"></div>
+        
+        <button class="btn-action analyze" id="btnAnalyze" onclick="app.analyze()" title="Run ML Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v2H3zm0 4h10v2H3zm0 4h7v2H3z"/></svg>
+          Analyze
         </button>
-      </div>
-      <div class="hr"></div>
-      <div class="ctrl-row buttons" style="grid-template-columns: 1fr 1fr 1fr;">
-        <button class="btn-action download" id="btnDownloadExcel" onclick="app.downloadExcel()" title="Download Excel" disabled>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 7l4 4 4-4"/><line x1="2" y1="14" x2="14" y2="14"/></svg>
-          Excel
-        </button>
-        <button class="btn-action download" id="btnDownloadPdf" onclick="app.downloadPdf()" title="Download PDF" disabled>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
-          PDF
-        </button>
-        <button class="btn-action analyze" id="btnStatus" title="Processing Status" disabled>
-          <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6"/></svg>
-          Waiting
+        
+        <button class="btn-action download" id="btnDownloadExcel" onclick="app.exportAnalysis()" title="Export Analysis Report" style="flex: none; height: 40px; font-size: 13px;" disabled>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 2v9M4 7l4 4 4-4"/><line x1="2" y1="14" x2="14" y2="14"/>
+          </svg>
+          Export Analysis
         </button>
       </div>
     </div>
@@ -2814,13 +2707,23 @@ body.light-theme #analysisDetail .metric-detail-section {
 
 </div>
 
-<div id="toast"></div>
-<div class="modal-backdrop" id="analysisModal" role="presentation">
-  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="app.closeAnalysisModal()" aria-label="Close analysis modal">×</button>
-    <div class="modal-title" id="analysisModalTitle">Analysis Complete</div>
-    <div class="modal-message" id="analysisModalMessage">Patterns Analyzed Successfully</div>
-  </div>
+<!-- Alert overlay -->
+<div class="alert-overlay" id="alertOverlay" role="presentation">
+    <div class="alert-card" role="dialog" aria-modal="true" aria-labelledby="alertTitle" aria-hidden="true">
+        <div class="alert-hdr">
+            <div class="alert-ico error" id="alertIco">!</div>
+            <div class="alert-title" id="alertTitle">Error</div>
+        </div>
+        <div class="alert-body" id="alertBody"></div>
+        <button class="alert-ok error" id="alertOk" onclick="app.closeAlert()">OK</button>
+    </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay" role="presentation">
+    <div class="loading-card">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loadingText">Analyzing Data...</div>
+    </div>
 </div>
 
 <!-- Metric Detail Modals -->
@@ -2972,7 +2875,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 // ── Chart ─────────────────────────────────────────────────────────────────────
 const cvs = document.getElementById('chart');
 const ctx = cvs.getContext('2d');
-let latestChunk = null;   // array of 500 percent values (0-100)
+let latestChunk = null;
 function drawChart() {
   const cvs = document.getElementById('chart');
   const ctx = cvs.getContext('2d');
@@ -2984,7 +2887,6 @@ function drawChart() {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
   
-  // Detect light theme
   const isLightTheme = document.body.classList.contains('light-theme');
   
   if (!latestChunk) {
@@ -2995,12 +2897,10 @@ function drawChart() {
     return;
   }
 
-  // ── Axes dimensions ──
   const pad = { t: 24, r: 24, b: 48, l: 56 };
   const iW = W - pad.l - pad.r;
   const iH = H - pad.t - pad.b;
 
-  // ── Y axis: 0-100% ──
   ctx.font = "10px 'JetBrains Mono', monospace";
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   
@@ -3013,7 +2913,6 @@ function drawChart() {
     ctx.fillText(p + '%', pad.l - 10, y);
   }
 
-  // Y axis title
   ctx.save();
   ctx.translate(14, pad.t + iH / 2);
   ctx.rotate(-Math.PI / 2);
@@ -3023,7 +2922,6 @@ function drawChart() {
   ctx.fillText('Scheduler Load %', 0, 0);
   ctx.restore();
 
-  // ── X axis: Frame 0-499 ──
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.font = "10px 'JetBrains Mono', monospace";
 
@@ -3034,13 +2932,11 @@ function drawChart() {
     ctx.fillText(f, x, pad.t + iH + 8);
   });
 
-  // X axis title
   ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
   ctx.font = "10px 'Inter', sans-serif";
   ctx.fillStyle = isLightTheme ? '#6b7280' : '#8a8f9f';
   ctx.fillText('Frame Index', pad.l + iW / 2, H - 4);
 
-  // ── Dynamic Threshold Line ──
   const THRESHOLD_US = 2000;
   const SCALE_FACTOR = 20;
   const threshPct = THRESHOLD_US / SCALE_FACTOR; 
@@ -3057,7 +2953,6 @@ function drawChart() {
     ctx.setLineDash([]);
   }
 
-  // ── Calculate Points ──
   const points = [];
   latestChunk.forEach((pct, frameIdx) => {
     const x = pad.l + (frameIdx / 499) * iW;
@@ -3065,11 +2960,10 @@ function drawChart() {
     points.push({ x, y, pct });
   });
 
-  // ── Draw Area Gradient ──
   ctx.beginPath();
-  ctx.moveTo(points[0].x, pad.t + iH); // Start at bottom-left
+  ctx.moveTo(points[0].x, pad.t + iH);
   points.forEach(pt => ctx.lineTo(pt.x, pt.y));
-  ctx.lineTo(points[points.length - 1].x, pad.t + iH); // Drop to bottom-right
+  ctx.lineTo(points[points.length - 1].x, pad.t + iH);
   ctx.closePath();
 
   const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + iH);
@@ -3085,7 +2979,6 @@ function drawChart() {
   ctx.fillStyle = grad;
   ctx.fill();
 
-  // ── Draw Crisp Top Line ──
   ctx.beginPath();
   points.forEach((pt, i) => {
     if (i === 0) ctx.moveTo(pt.x, pt.y);
@@ -3097,14 +2990,12 @@ function drawChart() {
   ctx.lineCap = 'round';
   ctx.stroke();
 
-  // ── Draw Red Dots for "Blown" Frames ──
   ctx.fillStyle = isLightTheme ? '#dc2626' : '#ef4444';
   points.forEach(pt => {
     if ((pt.pct * SCALE_FACTOR) > THRESHOLD_US) {
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
       ctx.fill();
-      // Add glow effect
       ctx.strokeStyle = isLightTheme ? 'rgba(220, 38, 38, 0.3)' : 'rgba(239, 68, 68, 0.4)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
@@ -3115,11 +3006,10 @@ new ResizeObserver(drawChart).observe(document.querySelector('.chart-box'));
 
 // ── App controller ─────────────────────────────────────────────────────────────
 const app = (() => {
-  let connected = false, running = false, analysisRunning = false, reportReady = false;
+  let connected = false, running = false, canExport = false, canAnalyze = false, canDownloadExcel = false, analysisRunning = false;
   let currentMetricShown = null;
   let lastUsbConnected = null;
   
-  // ── Metric Data Storage ──
   let metricData = {
     blown: 0,
     avgUs: 0,
@@ -3127,14 +3017,16 @@ const app = (() => {
     maxFrame: 0,
     totalTime: 0,
     frameCount: 0,
-    blownFrames: [],
+    blownFrames: [],       // current-chunk blown frames (for chart coloring)
+    blownFramesList: [],   // accumulated all-session blown frames
     maxFrames: [],
-    allFrames: []
+    allFrames: [],
+    frameAvgs: [],         // per-frame running averages (500 entries)
+    top10: []              // top-10 frames by timeUs across whole session
   };
   const THRESHOLD_US = 2000;
   const SCALE_FACTOR = 20;
 
-  // ── Theme Management ──
   function initTheme() {
     const savedTheme = localStorage.getItem('theme') || 'dark';
     setTheme(savedTheme);
@@ -3149,7 +3041,7 @@ const app = (() => {
     }
     localStorage.setItem('theme', theme);
     updateThemeIcons(isDark);
-    drawChart(); // Redraw chart with new theme colors
+    drawChart();
   }
 
   function toggleTheme() {
@@ -3162,37 +3054,37 @@ const app = (() => {
     const sunIcon = document.getElementById('sunIcon');
     const moonIcon = document.getElementById('moonIcon');
 
-    // Dark theme = show Sun
-    if (isDark) {
-      sunIcon.style.display = 'block';
-      moonIcon.style.display = 'none';
-    } 
-    // Light theme = show Moon
-    else {
-      sunIcon.style.display = 'none';
-      moonIcon.style.display = 'block';
-    }
+    sunIcon.style.display = isDark ? 'block' : 'none';
+    moonIcon.style.display = isDark ? 'none' : 'block';
   }
 
-  // Attach theme toggle listener
   document.getElementById('themeToggle').addEventListener('click', toggleTheme);
 
-  function log(msg, cls = '') {
-    toast(msg, cls);
+  function showAlert(title, body, type) {
+    const overlay = document.getElementById("alertOverlay");
+    if (!overlay) return;
+    document.getElementById("alertTitle").textContent = title;
+    document.getElementById("alertBody").textContent = body;
+    const ico = document.getElementById("alertIco");
+    const ok = document.getElementById("alertOk");
+    type = type || "error";
+    if (type === 'err') type = 'error';
+    if (type === 'ok') type = 'success';
+    if (type === 'warn') type = 'warning';
+
+    ico.className = "alert-ico " + type;
+    ok.className = "alert-ok " + type;
+    ico.textContent = (type === "success") ? "✓" : (type === "warning") ? "⚠" : (type === "info") ? "i" : "!";
+    overlay.classList.add("show");
+    overlay.setAttribute('aria-hidden', 'false');
+    setTimeout(() => ok.focus(), 50);
   }
 
-  function toast(msg, cls = '') {
-    const t = document.getElementById('toast');
-    t.textContent = msg; 
-    t.className = cls + ' show';
-    clearTimeout(t._t);
-    t._t = setTimeout(() => t.classList.remove('show'), 4500);
-  }
-
-  function setStatus(state, label) {
-    const severity = state === 'done' ? 'success' : (state === 'connected' || state === 'running' ? 'info' : (state === 'error' ? 'err' : ''));
-    if (label) {
-      toast(label, severity);
+  function closeAlert() {
+    const overlay = document.getElementById("alertOverlay");
+    if (overlay) {
+        overlay.classList.remove("show");
+        overlay.setAttribute('aria-hidden', 'true');
     }
   }
 
@@ -3207,26 +3099,23 @@ const app = (() => {
     text.textContent = isConnected ? 'Connected' : 'Disconnected';
     status.classList.toggle('connected', isConnected);
     status.classList.toggle('disconnected', !isConnected);
+
   }
 
   function sync() {
     const btn = document.getElementById('btnConn');
-    btn.title = connected ? 'Disconnect from port' : 'Connect to port';
+    btn.textContent = connected ? 'Disconnect' : 'Connect';
+    btn.classList.toggle('disconnect-mode', connected);
+    
+    // FIX: Disable the Disconnect button if data gathering OR ML analysis is currently running
+    btn.disabled = running || analysisRunning;
+
     document.getElementById('btnStart').disabled  = !connected || running;
     document.getElementById('btnStop').disabled   = !running;
-    document.getElementById('btnDownloadExcel').disabled = !reportReady || analysisRunning;
-    document.getElementById('btnDownloadPdf').disabled = !reportReady || analysisRunning;
-    document.getElementById('btnOpenSession').disabled = !reportReady || analysisRunning;
-    const statusBtn = document.getElementById('btnStatus');
-    if (analysisRunning) {
-      statusBtn.textContent = 'Processing';
-    } else if (reportReady) {
-      statusBtn.textContent = 'Report Ready';
-    } else if (running) {
-      statusBtn.textContent = 'Streaming';
-    } else {
-      statusBtn.textContent = 'Waiting';
-    }
+    
+    // Control ML flow buttons
+    document.getElementById('btnAnalyze').disabled = !canAnalyze || analysisRunning;
+    document.getElementById('btnDownloadExcel').disabled = !canDownloadExcel;
   }
 
   function showChartView() {
@@ -3242,24 +3131,20 @@ const app = (() => {
   }
 
   function setStats(blown, avgUs, maxUs, maxFrame) {
-    // Update UI
     document.getElementById('svBlown').textContent    = blown    != null ? Number(blown).toLocaleString()   : '—';
     document.getElementById('svAvg').textContent      = avgUs    != null ? Number(avgUs).toLocaleString()   : '—';
     document.getElementById('svMaxTime').textContent  = maxUs    != null ? Number(maxUs).toLocaleString()   : '—';
     document.getElementById('svMaxFrame').textContent = maxFrame != null ? Number(maxFrame).toLocaleString() : '—';
     
-    // Store metric data
     metricData.blown = blown || 0;
     metricData.avgUs = avgUs || 0;
     metricData.maxUs = maxUs || 0;
     metricData.maxFrame = maxFrame || 0;
     
-    // Calculate total time and frame count
     if (latestChunk && Array.isArray(latestChunk)) {
       metricData.frameCount = latestChunk.length;
       metricData.totalTime = (metricData.avgUs * metricData.frameCount);
       
-      // Build frames array with actual times
       metricData.allFrames = latestChunk.map((pct, idx) => ({
         frameIndex: idx,
         percentValue: pct,
@@ -3268,50 +3153,67 @@ const app = (() => {
       }));
       metricData.maxFrames = [];
       
-      // Get blown frames sorted by time (descending)
       metricData.blownFrames = metricData.allFrames
         .filter(f => f.isBlown)
         .sort((a, b) => b.timeUs - a.timeUs);
     }
   }
 
-  async function refreshPorts() {
+async function refreshPorts() {
     const icon = document.getElementById('refreshIcon');
     icon.classList.add('spin');
     const ports = JSON.parse(await window.pywebview.api.get_ports());
     icon.classList.remove('spin');
+    
     const sel = document.getElementById('portSel');
     const prev = sel.value;
-    sel.innerHTML = '<option value="">Select port…</option>';
-    ports.forEach(p => {
-      const o = document.createElement('option');
-      o.value = o.textContent = p;
-      if (p === prev) o.selected = true;
-      sel.appendChild(o);
-    });
-    log(`Found ${ports.length} port(s)${ports.length ? ': ' + ports.join(', ') : '.'}`, ports.length ? 'info' : '');
+    
+    if (ports.length === 0) {
+      sel.innerHTML = '<option value="">No USB ports found</option>';
+    } else {
+      sel.innerHTML = ''; // Clear existing options
+      
+      // Populate the dropdown with USB ports
+      ports.forEach(p => {
+        const o = document.createElement('option');
+        o.value = o.textContent = p;
+        sel.appendChild(o);
+      });
+      
+      // Auto-select logic: 
+      // Keep the previous selection if it's still plugged in, 
+      // otherwise default to the first USB port in the list.
+      if (ports.includes(prev)) {
+        sel.value = prev;
+      } else {
+        sel.value = ports[0];
+      }
+    }
   }
 
   async function toggleConnect() {
     if (connected) {
-      await window.pywebview.api.disconnect();
-      connected = false; running = false; analysisRunning = false; reportReady = false;
+      // FIX: Check backend response before aggressively tearing down the UI state
+      const r = JSON.parse(await window.pywebview.api.disconnect());
+      if (r.status === 'error') {
+        showAlert("Action Denied", r.message, "warning");
+        return;
+      }
+      
+      connected = false; running = false; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
       updateUsbStatus(false);
-      setStatus('', 'Disconnected');
-      log('Disconnected.', 'warn');
+      showAlert("Disconnected", "Successfully disconnected from the port.", "warning");
     } else {
       const port = document.getElementById('portSel').value;
       const baud = document.getElementById('baudSel').value;
-      if (!port) { log('Select a COM port first.', 'err'); return; }
+      if (!port) { showAlert("Warning", "Select a COM port first.", "warning"); return; }
       const r = JSON.parse(await window.pywebview.api.connect(port, baud));
       if (r.status === 'ok') {
         connected = true;
         updateUsbStatus(true);
-        setStatus('connected', 'Connected');
-        log(r.message, 'ok');
       } else {
         updateUsbStatus(false);
-        log('Failed: ' + r.message, 'err');
+        showAlert("Connection Failed", r.message, "error");
       }
     }
     sync();
@@ -3320,14 +3222,16 @@ const app = (() => {
   async function startAnalysis() {
     const r = JSON.parse(await window.pywebview.api.start_analysis());
     if (r.status === 'ok') {
-      running = true; analysisRunning = false; reportReady = false;
+      running = true; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
       latestChunk = null;
+      metricData.blownFramesList = [];
+      metricData.frameAvgs = [];
+      metricData.top10 = [];
       showChartView();
       setStats(0, 0, 0, 0); drawChart();
-      setStatus('running', 'Live Streaming');
-      log('Analysis started — receiving live chunks every second.', 'info');
+      showAlert("Analysis Started", "Receiving chunks every second...", "info");
     } else {
-      log('Start failed: ' + r.message, 'err');
+      showAlert("Start Failed", r.message, "error");
     }
     sync();
   }
@@ -3337,95 +3241,136 @@ const app = (() => {
     running = false;
     if (r.status === 'ok') {
       showChartView();
-      analysisRunning = true;
-      reportReady = false;
-      setStatus('running', 'Processing');
-      toast('Stream stopped. Processing live session data...', 'info');
-      log(r.message + (r.ack_received ? ' (ACK received)' : ' (ACK timeout)'), 'ok');
+      canExport = true;
+      canAnalyze = true;
+      canDownloadExcel = false;
+      showAlert("Analysis Complete", r.message + (r.ack_received ? ' (ACK received)' : ' (ACK timeout)'), "success");
       const s = JSON.parse(await window.pywebview.api.get_summary());
       setStats(s.blown, s.avg_us, s.max_us, s.max_frame);
     } else {
-      log('Stop error: ' + r.message, 'err');
+      showAlert("Stop Error", r.message, "error");
     }
     sync();
+  }
+
+  async function exportCsv() {
+    const r = JSON.parse(await window.pywebview.api.export_csv());
+    
+    if (r.status === 'ok') {
+      showAlert("Export Successful", `Saved ${Number(r.rows).toLocaleString()} rows → ${r.path}`, "success");
+    } else if (r.status === 'cancelled') {
+    } else {
+      showAlert("Export Error", r.message, "error");
+    }
   }
 
   function onChunk(data) {
-    latestChunk = data.frame_data;   // 500 percent values
+    latestChunk = data.frame_data;
+
+    // Accumulate blown frames (delta from this chunk only)
+    if (data.new_blown_frames && data.new_blown_frames.length > 0) {
+      metricData.blownFramesList = metricData.blownFramesList.concat(data.new_blown_frames);
+    }
+    // Update per-frame averages and top-10 sent by backend
+    if (data.frame_avgs) metricData.frameAvgs = data.frame_avgs;
+    if (data.top10)       metricData.top10      = data.top10;
+
     setStats(data.blown, data.avg_us, data.max_us, data.max_frame);
     drawChart();
+
+    // Live-refresh whichever panel is open
+    if (currentMetricShown) _refreshCurrentPanel();
   }
 
-  function onError(msg) {
-    running = false; analysisRunning = false; setStatus('error', 'Error');
-    log('Serial error: ' + msg, 'err'); sync();
+  async function onError(msg) {
+    // 1. Stop all active operational flags
+    running = false; 
+    analysisRunning = false; 
+    
+    // 2. Force the UI connection state to false
+    connected = false;
+    
+    // 3. Allow the user to export whatever data was captured before the yank
+    canExport = true; 
+    
+    // 4. Tell the Python backend to close the dead port and clean up
+    await window.pywebview.api.disconnect();
+    
+    // 5. Update the top UI status indicator
+    updateUsbStatus(false);
+    
+    // 6. Show a clear alert to the user
+    showAlert("Connection Lost", "The USB device was disconnected unexpectedly - " + msg, "error");
+    
+    // 7. Sync the buttons to reflect the new disconnected state
+    sync();
   }
 
-  async function downloadExcel() {
-    const r = JSON.parse(await window.pywebview.api.download_excel());
+  function showLoading(msg) {
+    const overlay = document.getElementById("loadingOverlay");
+    if (overlay) {
+      document.getElementById("loadingText").textContent = msg || 'Processing...';
+      overlay.classList.add("show");
+    }
+  }
+
+  function hideLoading() {
+    const overlay = document.getElementById("loadingOverlay");
+    if (overlay) {
+      overlay.classList.remove("show");
+    }
+  }
+
+  async function analyze() {
+    if (analysisRunning) return;
+    const r = JSON.parse(await window.pywebview.api.analyze());
     if (r.status === 'ok') {
-      toast(`Excel downloaded → ${r.path}`, 'success');
+      analysisRunning = true;
+      canDownloadExcel = false;
+      
+      // SHOW the loading screen instead of the success alert
+      showLoading("Running Machine Learning Analysis... Please wait.");
+      
+      sync();
+    } else {
+      showAlert("Analysis Error", r.message, "error");
+    }
+  }
+
+  async function exportAnalysis() {
+    const r = JSON.parse(await window.pywebview.api.export_analysis());
+    if (r.status === 'ok') {
+      const extra = r.anomaly_csv_path ? `\nAnomalies CSV exported → ${r.anomaly_csv_path}` : '';
+      showAlert("Export Successful", `Excel exported → ${r.excel_path}\nPDF exported → ${r.pdf_path}${extra}`, "success");
     } else if (r.status === 'cancelled') {
-      toast(r.message, 'warn');
     } else {
-      toast(r.message, 'err');
+      showAlert("Export Error", r.message, "error");
     }
   }
 
-  async function downloadPdf() {
-    const r = JSON.parse(await window.pywebview.api.download_pdf());
-    if (r.status === 'ok') {
-      toast(`PDF downloaded → ${r.path}`, 'success');
-    } else if (r.status === 'cancelled') {
-      toast(r.message, 'warn');
-    } else {
-      toast(r.message, 'err');
-    }
-  }
-
-  async function openSessionFolder() {
-    const r = JSON.parse(await window.pywebview.api.open_session_folder());
-    if (r.status === 'ok') {
-      toast(`Session folder opened → ${r.path}`, 'success');
-    } else {
-      toast(r.message, 'err');
-    }
-  }
-
-  async function onAnalysisComplete(payload) {
+  function onAnalysisComplete(payload) {
     analysisRunning = false;
-    reportReady = true;
+    canDownloadExcel = true;
+    
+    // HIDE the loading screen
+    hideLoading();
+    
     sync();
     showChartView();
-    toast(payload && payload.message ? payload.message : 'Analysis Completed Successfully', 'success');
-    log('Report Ready: Download Excel, Download PDF, or Open Session Folder.', 'ok');
+    showAlert("Analysis Complete", payload && payload.message ? payload.message : 'Patterns Analyzed Successfully', "success");
   }
 
   function onAnalysisError(msg) {
     analysisRunning = false;
-    reportReady = false;
-    toast(msg, 'err');
+    canDownloadExcel = false;
+    
+    // HIDE the loading screen
+    hideLoading();
+    
+    showAlert("Analysis Error", msg, "error");
     sync();
   }
 
-  function showAnalysisModal(message) {
-    // Keep the graph as the default view; analysis messages are surfaced via toast.
-    toast(message, 'success');
-  }
-
-  function closeAnalysisModal() {
-    const modal = document.getElementById('analysisModal');
-    modal.classList.remove('show');
-    modal.setAttribute('aria-hidden', 'true');
-    releaseFocus(modal);
-    currentOpenModal = null;
-    // Restore focus to the previously focused element
-    if (previousFocusedElement && document.body.contains(previousFocusedElement)) {
-      setTimeout(() => previousFocusedElement.focus(), 100);
-    }
-  }
-
-  // ── Modal Management & Focus Trap ──
   let currentOpenModal = null;
   let previousFocusedElement = null;
 
@@ -3453,13 +3398,11 @@ const app = (() => {
       if (e.key !== 'Tab') return;
 
       if (e.shiftKey) {
-        // Shift + Tab
         if (document.activeElement === firstElement) {
           e.preventDefault();
           lastElement.focus();
         }
       } else {
-        // Tab
         if (document.activeElement === lastElement) {
           e.preventDefault();
           firstElement.focus();
@@ -3478,26 +3421,19 @@ const app = (() => {
   }
 
   function handleGlobalKeyboard(e) {
-    // ESC to close any open modal
-    if (e.key === 'Escape' && currentOpenModal) {
-      const modalId = currentOpenModal.id;
-      
-      if (modalId === 'analysisModal') {
-        closeAnalysisModal();
-      } else if (modalId.endsWith('Modal')) {
-        closeMetricModal(modalId);
+    if (e.key === 'Escape') {
+      closeAlert();
+      if (currentOpenModal && currentOpenModal.id.endsWith('Modal')) {
+        closeMetricModal(currentOpenModal.id);
       }
     }
   }
 
-  // ── Metric Modal Functions with Focus Management ──
   function openMetricModal(modalId) {
-    // Map legacy modal ids to inline metric keys and show inline instead
     if (modalId === 'frameBlownModal') return toggleMetricView('frameBlown');
     if (modalId === 'avgTimeModal') return toggleMetricView('avgTime');
     if (modalId === 'maxTimeModal') return toggleMetricView('maxTime');
     if (modalId === 'peakFrameModal') return toggleMetricView('peakFrame');
-    // fallback: do nothing
   }
 
   function closeMetricModal(modalId) {
@@ -3508,23 +3444,18 @@ const app = (() => {
       releaseFocus(modal);
       currentOpenModal = null;
       
-      // Restore focus to the previously focused element
       if (previousFocusedElement && document.body.contains(previousFocusedElement)) {
         setTimeout(() => previousFocusedElement.focus(), 100);
       }
     }
   }
 
-  // Toggle metric view inside the Analysis View area (inline, not modal)
   function toggleMetricView(metricKey) {
     const chartView = document.getElementById('chartView');
     const analysisDetail = document.getElementById('analysisDetail');
 
-    // If clicking the same metric again, toggle back to chart
     if (currentMetricShown === metricKey) {
-      // hide inline
       currentMetricShown = null;
-      // hide all inline metric containers
       ['frameBlown','avgTime','maxTime','peakFrame'].forEach(k => {
         const el = document.getElementById('inline_' + k);
         if (el) el.style.display = 'none';
@@ -3534,302 +3465,326 @@ const app = (() => {
       return;
     }
 
-    // Show selected metric
     currentMetricShown = metricKey;
-    // hide chart
     chartView.style.display = 'none';
     analysisDetail.style.display = 'flex';
-    // Hide all then show selected
     ['frameBlown','avgTime','maxTime','peakFrame'].forEach(k => {
       const el = document.getElementById('inline_' + k);
-      if (el) el.style.display = (k === metricKey) ? 'block' : 'none';
+      if (el) el.style.display = (k === metricKey) ? 'flex' : 'none';
     });
 
-    // Populate the selected view
-    if (metricKey === 'frameBlown') {
-      populateBlownFramesModal();
-    } else if (metricKey === 'avgTime') {
-      populateAvgTimeModal();
-    } else if (metricKey === 'maxTime') {
-      populateMaxTimeModal();
-    } else if (metricKey === 'peakFrame') {
-      populatePeakFrameModal();
-    }
+    _refreshCurrentPanel();
   }
 
-  function populateBlownFramesModal() {
-    // Update title dynamically based on count
-    const totalBlown = metricData.blown;
-    document.getElementById('blownModalTitle').textContent = `${totalBlown.toLocaleString()} Blown Frame${totalBlown !== 1 ? 's' : ''}`;
-    
-    const blownPercent = metricData.frameCount > 0 
-      ? ((metricData.blown / metricData.frameCount) * 100).toFixed(2)
-      : '0.00';
-    document.getElementById('blownPercent').textContent = `${blownPercent}%`;
-    
-    // Update label to show total count
-    document.getElementById('blownFramesCountLabel').textContent = `All ${totalBlown.toLocaleString()} Blown Frame${totalBlown !== 1 ? 's' : ''}`;
-    
-    // Initialize filter state if not exists
-    if (!window.blownFilterState) {
-      window.blownFilterState = {
-        sortBy: 'timeUs',
-        sortAsc: false
-      };
-    }
-    
-    renderBlownFramesTable();
+  // ── Internal helpers ─────────────────────────────────────────
+  let _blownSort = { by: 'timeUs', asc: false };
 
-    // Also render inline version if visible
-    renderBlownFramesTable(true);
+  function _refreshCurrentPanel() {
+    if (currentMetricShown === 'frameBlown') _renderBlown();
+    else if (currentMetricShown === 'avgTime')   _renderAvg();
+    else if (currentMetricShown === 'maxTime')   _renderMax();
+    else if (currentMetricShown === 'peakFrame') _renderPeak();
   }
 
-  function renderBlownFramesTable() {
-    const state = window.blownFilterState;
-    let filtered = [...metricData.blownFrames];
-    
-    // Sort based on current state
-    filtered.sort((a, b) => {
-      let aVal, bVal;
-      
-      if (state.sortBy === 'timeUs') {
-        aVal = a.timeUs;
-        bVal = b.timeUs;
-      } else if (state.sortBy === 'frameIndex') {
-        aVal = a.frameIndex;
-        bVal = b.frameIndex;
-      } else {
-        // rank - use index in original array
-        aVal = metricData.blownFrames.indexOf(a) + 1;
-        bVal = metricData.blownFrames.indexOf(b) + 1;
+  function _rankBadge(rank) {
+    const cls = rank === 1 ? 'r1' : rank === 2 ? 'r2' : rank === 3 ? 'r3' : 'rn';
+    return `<span class="rank-badge ${cls}">${rank}</span>`;
+  }
+
+  function _timebar(us, maxUs, cls) {
+    const pct = maxUs > 0 ? Math.min(100, (us / maxUs) * 100).toFixed(1) : 0;
+    return `<div class="time-bar-wrap">
+      <div class="time-bar-bg"><div class="time-bar-fill ${cls}" style="width:${pct}%"></div></div>
+    </div>`;
+  }
+
+  // ── 1. Frames Blown ────────────────────────────────────────────
+  function _renderBlown() {
+    const total = metricData.blown;
+    const frameCount = metricData.frameCount || 500;
+    const pct = frameCount > 0 ? ((total / frameCount) * 100).toFixed(2) : '0.00';
+
+    _setText('ib_totalBlown', total.toLocaleString());
+    _setText('ib_blownPct', pct + '%');
+
+    const list = metricData.blownFramesList;
+    const last = list.length > 0 ? 's' + list[list.length - 1].second : '—';
+    _setText('ib_lastBlownSec', last);
+    _setText('ib_blownCount', list.length.toLocaleString());
+
+    // Sort
+    let sorted = [...list];
+    sorted.sort((a, b) => {
+      const v = _blownSort.by === 'frameIndex' ? 'frameIndex'
+              : _blownSort.by === 'second'     ? 'second' : 'timeUs';
+      return _blownSort.asc ? a[v] - b[v] : b[v] - a[v];
+    });
+
+    const maxUs = sorted.length > 0 ? sorted[0].timeUs : THRESHOLD_US;
+    const tbody = document.getElementById('ib_blownBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    sorted.forEach((f, idx) => {
+      const barCls = f.timeUs > THRESHOLD_US * 1.5 ? 'blown' : 'peak';
+      const over = f.timeUs - THRESHOLD_US;
+      const severity = over > 1000 ? '<span class="dash-badge critical">Critical</span>'
+                     : over > 500  ? '<span class="dash-badge moderate">High</span>'
+                     :               '<span class="dash-badge good">Over</span>';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${_rankBadge(idx + 1)}</td>
+        <td style="color:var(--text-primary);font-weight:600;">${f.frameIndex}</td>
+        <td>s${f.second}</td>
+        <td style="color:var(--red-light);">${f.timeUs.toLocaleString()}</td>
+        <td>${severity}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    // highlight active sort button
+    ['Frame','Sec','Time'].forEach(k => {
+      const btn = document.getElementById('ib_sort' + k + 'Btn');
+      if (!btn) return;
+      const key = k === 'Frame' ? 'frameIndex' : k === 'Sec' ? 'second' : 'timeUs';
+      const active = _blownSort.by === key;
+      btn.style.background = active ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.08)';
+      btn.style.borderColor = active ? 'var(--blue)' : 'var(--border)';
+      btn.style.color = active ? 'var(--blue-light)' : 'var(--text-secondary)';
+    });
+  }
+
+  function sortBlownInline(col) {
+    if (_blownSort.by === col) _blownSort.asc = !_blownSort.asc;
+    else { _blownSort.by = col; _blownSort.asc = false; }
+    _renderBlown();
+  }
+
+  // ── 2. Average Time ────────────────────────────────────────────
+  function _renderAvg() {
+    const avg = metricData.avgUs;
+    _setText('ib_avgOverall', avg.toLocaleString() + ' µs');
+    _setText('ib_avgFrameCount', metricData.frameCount.toLocaleString());
+
+    const badge = document.getElementById('ib_avgBadge');
+    if (badge) {
+      let cls, label;
+      if (avg < 500)       { cls='excellent'; label='✓ Excellent'; }
+      else if (avg < 1000) { cls='good';      label='✓ Good'; }
+      else if (avg < 1500) { cls='moderate';  label='⚠ Moderate'; }
+      else                 { cls='critical';  label='⚠ Concerning'; }
+      badge.className = 'dash-badge ' + cls;
+      badge.textContent = label;
+    }
+
+    // Draw sparkline
+    _drawAvgCanvas();
+
+    // Top 10 highest average frames
+    const avgs = metricData.frameAvgs;
+    if (!avgs || avgs.length === 0) return;
+
+    const indexed = avgs.map((v, i) => ({ frameIndex: i, avgUs: v }));
+    indexed.sort((a, b) => b.avgUs - a.avgUs);
+    const top10 = indexed.slice(0, 10);
+    const maxAvg = top10.length > 0 ? top10[0].avgUs : 1;
+
+    const tbody = document.getElementById('ib_avgTopBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    top10.forEach((f, idx) => {
+      const diff = f.avgUs - avg;
+      const diffStr = diff >= 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString();
+      const barCls = f.avgUs > THRESHOLD_US ? 'blown' : 'ok';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${_rankBadge(idx + 1)}</td>
+        <td style="color:var(--text-primary);font-weight:600;">${f.frameIndex}</td>
+        <td style="color:${f.avgUs > THRESHOLD_US ? 'var(--red-light)' : 'var(--green-light)'};">${f.avgUs.toLocaleString()}</td>
+        <td style="color:var(--text-muted);font-size:10px;">${diffStr} µs</td>
+        <td>${_timebar(f.avgUs, maxAvg, barCls)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function _drawAvgCanvas() {
+    const canvas = document.getElementById('ib_avgCanvas');
+    if (!canvas) return;
+    const avgs = metricData.frameAvgs;
+    if (!avgs || avgs.length === 0) return;
+
+    const wrap = canvas.parentElement;
+    const W = wrap.clientWidth || 400;
+    const H = wrap.clientHeight || 90;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+
+    const isLight = document.body.classList.contains('light-theme');
+    const maxVal = Math.max(...avgs, THRESHOLD_US + 200);
+    const pad = { t: 6, r: 6, b: 6, l: 6 };
+    const iW = W - pad.l - pad.r;
+    const iH = H - pad.t - pad.b;
+
+    // Threshold line
+    const thY = pad.t + iH - (THRESHOLD_US / maxVal) * iH;
+    ctx.strokeStyle = isLight ? '#d97706' : '#f59e0b';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(pad.l, thY); ctx.lineTo(pad.l + iW, thY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Area fill
+    const pts = avgs.map((v, i) => ({
+      x: pad.l + (i / (avgs.length - 1)) * iW,
+      y: pad.t + iH - (v / maxVal) * iH
+    }));
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pad.t + iH);
+    pts.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(pts[pts.length - 1].x, pad.t + iH);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + iH);
+    grad.addColorStop(0, isLight ? 'rgba(37,99,235,0.22)' : 'rgba(59,130,246,0.28)');
+    grad.addColorStop(1, isLight ? 'rgba(37,99,235,0.02)' : 'rgba(59,130,246,0.02)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.strokeStyle = isLight ? '#2563eb' : '#60a5fa';
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Mark blown points
+    ctx.fillStyle = isLight ? '#dc2626' : '#ef4444';
+    pts.forEach((p, i) => {
+      if (avgs[i] > THRESHOLD_US) {
+        ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill();
       }
-      
-      return state.sortAsc ? aVal - bVal : bVal - aVal;
     });
-    
-    // Render table rows
-    // Render for modal
-    const modalTbody = document.getElementById('blownFramesList');
-    if (modalTbody) {
-      modalTbody.innerHTML = '';
-      filtered.forEach((frame, idx) => {
-        const tr = document.createElement('tr');
-        const rank = metricData.blownFrames.indexOf(frame) + 1;
-        tr.innerHTML = `
-          <td>${rank}</td>
-          <td>${frame.frameIndex}</td>
-          <td>${frame.timeUs.toLocaleString()}</td>
-        `;
-        modalTbody.appendChild(tr);
-      });
-    }
-
-    // Render inline version if present
-    const inlineTbody = document.getElementById('inline_blownFramesList');
-    if (inlineTbody) {
-      inlineTbody.innerHTML = '';
-      filtered.forEach((frame, idx) => {
-        const tr = document.createElement('tr');
-        const rank = metricData.blownFrames.indexOf(frame) + 1;
-        tr.innerHTML = `
-          <td>${rank}</td>
-          <td>${frame.frameIndex}</td>
-          <td>${frame.timeUs.toLocaleString()}</td>
-        `;
-        inlineTbody.appendChild(tr);
-      });
-    }
   }
 
-  function sortBlownFrames(column) {
-    if (!window.blownFilterState) {
-      window.blownFilterState = {
-        sortBy: 'timeUs',
-        sortAsc: false
-      };
-    }
-    
-    // If clicking the same column, toggle sort direction
-    if (window.blownFilterState.sortBy === column) {
-      window.blownFilterState.sortAsc = !window.blownFilterState.sortAsc;
-    } else {
-      // If clicking a different column, sort descending by default
-      window.blownFilterState.sortBy = column;
-      window.blownFilterState.sortAsc = false;
-    }
-    
-    renderBlownFramesTable();
-  }
+  // ── 3. Maximum Time ────────────────────────────────────────────
+  function _renderMax() {
+    const top10 = metricData.top10;
+    const sessionMax = metricData.maxUs;
+    const exceed = sessionMax - THRESHOLD_US;
+    _setText('ib_maxValue',  sessionMax.toLocaleString() + ' µs');
+    _setText('ib_maxExceed', exceed > 0 ? '+' + exceed.toLocaleString() + ' µs' : 'Within');
 
-  function populateAvgTimeModal() {
-    const avgVal = metricData.avgUs.toLocaleString() + ' µs';
-    const totalTime = metricData.totalTime.toLocaleString() + ' µs';
-    const frameCount = metricData.frameCount.toLocaleString();
-    if (document.getElementById('avgValue')) document.getElementById('avgValue').textContent = avgVal;
-    if (document.getElementById('avgTotalTime')) document.getElementById('avgTotalTime').textContent = totalTime;
-    if (document.getElementById('avgFrameCount')) document.getElementById('avgFrameCount').textContent = frameCount;
-    if (document.getElementById('inline_avgValue')) document.getElementById('inline_avgValue').textContent = avgVal;
-    if (document.getElementById('inline_avgTotalTime')) document.getElementById('inline_avgTotalTime').textContent = totalTime;
-    if (document.getElementById('inline_avgFrameCount')) document.getElementById('inline_avgFrameCount').textContent = frameCount;
-    
-    // Interpretation
-    let interpretation = '';
-    if (metricData.avgUs < 500) {
-      interpretation = 'Excellent: Average response time is very low, indicating optimal system performance.';
-    } else if (metricData.avgUs < 1000) {
-      interpretation = 'Good: Average response time is within acceptable range for normal operations.';
-    } else if (metricData.avgUs < 1500) {
-      interpretation = 'Acceptable: Average response time is moderate. Monitor for potential bottlenecks.';
-    } else {
-      interpretation = 'Concerning: Average response time is elevated. Consider optimizing system performance.';
-    }
-    if (document.getElementById('avgInterpretation')) document.getElementById('avgInterpretation').textContent = interpretation;
-    if (document.getElementById('inline_avgInterpretation')) document.getElementById('inline_avgInterpretation').textContent = interpretation;
-  }
+    // second of the session-max entry
+    const topEntry = top10.length > 0 ? top10[0] : null;
+    _setText('ib_maxSecond', topEntry ? 's' + topEntry.second : '—');
 
-  function populateMaxTimeModal() {
-    const maxValText = metricData.maxUs.toLocaleString() + ' µs';
-    if (document.getElementById('maxValue')) document.getElementById('maxValue').textContent = maxValText;
-    if (document.getElementById('inline_maxValue')) document.getElementById('inline_maxValue').textContent = maxValText;
-
-    const exceedance = metricData.maxUs - THRESHOLD_US;
-    const exceedText = exceedance > 0 
-      ? `+${exceedance.toLocaleString()} µs (${(exceedance / THRESHOLD_US * 100).toFixed(1)}% over)`
-      : 'Within threshold';
-    if (document.getElementById('maxExceedance')) document.getElementById('maxExceedance').textContent = exceedText;
-    if (document.getElementById('inline_maxExceedance')) document.getElementById('inline_maxExceedance').textContent = exceedText;
-
-    if (document.getElementById('maxFrameIndex')) document.getElementById('maxFrameIndex').textContent = metricData.maxFrame;
-    if (document.getElementById('inline_maxFrameIndex')) document.getElementById('inline_maxFrameIndex').textContent = metricData.maxFrame;
-
-    if (!window.maxFilterState) {
-      window.maxFilterState = {
-        sortBy: 'timeUs',
-        sortAsc: false
-      };
-    }
-
-    if (!metricData.maxFrames || metricData.maxFrames.length === 0) {
-      metricData.maxFrames = [...metricData.allFrames]
-        .sort((a, b) => b.timeUs - a.timeUs)
-        .slice(0, 10);
-    }
-    renderMaxFramesTable();
-  }
-
-  function renderMaxFramesTable() {
-    const state = window.maxFilterState;
-    let filtered = [...metricData.maxFrames];
-
-    filtered.sort((a, b) => {
-      let aVal, bVal;
-
-      if (state.sortBy === 'timeUs') {
-        aVal = a.timeUs;
-        bVal = b.timeUs;
-      } else if (state.sortBy === 'frameIndex') {
-        aVal = a.frameIndex;
-        bVal = b.frameIndex;
-      } else if (state.sortBy === 'timestamp') {
-        aVal = a.frameIndex / 500;
-        bVal = b.frameIndex / 500;
-      } else {
-        aVal = metricData.maxFrames.indexOf(a) + 1;
-        bVal = metricData.maxFrames.indexOf(b) + 1;
-      }
-
-      return state.sortAsc ? aVal - bVal : bVal - aVal;
+    const tbody = document.getElementById('ib_maxBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const maxUs = top10.length > 0 ? top10[0].timeUs : 1;
+    top10.forEach((f, idx) => {
+      const barCls = f.timeUs > THRESHOLD_US ? 'blown' : 'ok';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${_rankBadge(idx + 1)}</td>
+        <td style="color:var(--text-primary);font-weight:600;">${f.frameIndex}</td>
+        <td>s${f.second}</td>
+        <td style="color:${f.timeUs > THRESHOLD_US ? 'var(--red-light)' : 'var(--green-light)'};">${f.timeUs.toLocaleString()}</td>
+        <td>${_timebar(f.timeUs, maxUs, barCls)}</td>
+      `;
+      tbody.appendChild(tr);
     });
-
-    // Modal table
-    const modalTbody = document.getElementById('maxFramesList');
-    if (modalTbody) {
-      modalTbody.innerHTML = '';
-      filtered.forEach((frame) => {
-        const tr = document.createElement('tr');
-        const rank = metricData.maxFrames.indexOf(frame) + 1;
-        const timestamp = (frame.frameIndex / 500).toFixed(2);
-        tr.innerHTML = `
-          <td>${rank}</td>
-          <td>${frame.frameIndex}</td>
-          <td>${frame.timeUs.toLocaleString()}</td>
-          <td>${timestamp}s</td>
-        `;
-        modalTbody.appendChild(tr);
-      });
-    }
-
-    // Inline table
-    const inlineTbody = document.getElementById('inline_maxFramesList');
-    if (inlineTbody) {
-      inlineTbody.innerHTML = '';
-      filtered.forEach((frame) => {
-        const tr = document.createElement('tr');
-        const rank = metricData.maxFrames.indexOf(frame) + 1;
-        const timestamp = (frame.frameIndex / 500).toFixed(2);
-        tr.innerHTML = `
-          <td>${rank}</td>
-          <td>${frame.frameIndex}</td>
-          <td>${frame.timeUs.toLocaleString()}</td>
-          <td>${timestamp}s</td>
-        `;
-        inlineTbody.appendChild(tr);
-      });
-    }
   }
 
-  function sortMaxFrames(column) {
-    if (!window.maxFilterState) {
-      window.maxFilterState = {
-        sortBy: 'timeUs',
-        sortAsc: false
-      };
+  // ── 4. Peak Frame ──────────────────────────────────────────────
+  function _renderPeak() {
+    const top10 = metricData.top10;
+    const peakFrame = metricData.maxFrame;
+    const peakTime  = metricData.maxUs;
+
+    _setText('ib_peakHeroNum',  'Frame ' + peakFrame);
+    _setText('ib_peakHeroTime', peakTime.toLocaleString() + ' µs — absolute session peak');
+    _setText('ib_peakFrameNum',  peakFrame.toLocaleString());
+    _setText('ib_peakFrameTime', peakTime.toLocaleString() + ' µs');
+
+    const heroBadge = document.getElementById('ib_peakHeroBadge');
+    if (heroBadge) {
+      const blown = peakTime > THRESHOLD_US;
+      heroBadge.innerHTML = blown
+        ? '<span class="dash-badge critical">⚠️ Blown</span>'
+        : '<span class="dash-badge excellent">✓ OK</span>';
+    }
+    const statusEl = document.getElementById('ib_peakStatus');
+    if (statusEl) {
+      const blown = peakTime > THRESHOLD_US;
+      statusEl.className = 'dash-badge ' + (blown ? 'critical' : 'excellent');
+      statusEl.textContent = blown ? '⚠️ Blown' : '✓ OK';
     }
 
-    if (window.maxFilterState.sortBy === column) {
-      window.maxFilterState.sortAsc = !window.maxFilterState.sortAsc;
-    } else {
-      window.maxFilterState.sortBy = column;
-      window.maxFilterState.sortAsc = false;
-    }
-
-    renderMaxFramesTable();
+    const tbody = document.getElementById('ib_peakBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const maxUs = top10.length > 0 ? top10[0].timeUs : 1;
+    top10.forEach((f, idx) => {
+      const blown = f.timeUs > THRESHOLD_US;
+      const statusBadge = blown
+        ? '<span class="dash-badge critical" style="padding:2px 6px;font-size:9px;">⚠ Blown</span>'
+        : '<span class="dash-badge excellent" style="padding:2px 6px;font-size:9px;">✓ OK</span>';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${_rankBadge(idx + 1)}</td>
+        <td style="color:var(--blue-light);font-weight:700;font-size:13px;">${f.frameIndex}</td>
+        <td>s${f.second}</td>
+        <td style="color:${blown ? 'var(--red-light)' : 'var(--green-light)'};">${f.timeUs.toLocaleString()}</td>
+        <td>${statusBadge}</td>
+      `;
+      tbody.appendChild(tr);
+    });
   }
 
-  function populatePeakFrameModal() {
-    const peakNum = `Frame ${metricData.maxFrame}`;
-    const peakTime = metricData.maxUs.toLocaleString() + ' µs';
-    const exceeds = metricData.maxUs > THRESHOLD_US;
-    const peakStatus = exceeds ? '⚠️ Yes' : '✓ No';
-    const peakExceed = exceeds ? `+${(metricData.maxUs - THRESHOLD_US).toLocaleString()} µs` : 'N/A';
-
-    if (document.getElementById('peakFrameNum')) document.getElementById('peakFrameNum').textContent = peakNum;
-    if (document.getElementById('inline_peakFrameNum')) document.getElementById('inline_peakFrameNum').textContent = peakNum;
-
-    if (document.getElementById('peakFrameTime')) document.getElementById('peakFrameTime').textContent = peakTime;
-    if (document.getElementById('inline_peakFrameTime')) document.getElementById('inline_peakFrameTime').textContent = peakTime;
-
-    if (document.getElementById('peakFrameStatus')) document.getElementById('peakFrameStatus').textContent = peakStatus;
-    if (document.getElementById('inline_peakFrameStatus')) document.getElementById('inline_peakFrameStatus').textContent = peakStatus;
-
-    if (document.getElementById('peakFrameExceed')) document.getElementById('peakFrameExceed').textContent = peakExceed;
-    if (document.getElementById('inline_peakFrameExceed')) document.getElementById('inline_peakFrameExceed').textContent = peakExceed;
+  function _setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
   }
+
+  // ── Legacy compat stubs (old modal populate fns no longer used inline) ───
+  function populateBlownFramesModal() { _renderBlown(); }
+  function populateAvgTimeModal()     { _renderAvg(); }
+  function populateMaxTimeModal()     { _renderMax(); }
+  function populatePeakFrameModal()   { _renderPeak(); }
+  function renderBlownFramesTable()   {}
+  function renderMaxFramesTable()     {}
+  function sortBlownFrames(col)       { sortBlownInline(col); }
+  function sortMaxFrames(col)         {}
 
   window.addEventListener('pywebviewready', () => {
     initTheme();
     refreshPorts();
-    toast('Tool ready. Select a port and connect.', 'info');
+    showAlert("Tool Ready", "Select a port and connect to begin.", "info");
     drawChart();
     
-    // Add global keyboard event listener for accessibility
     document.addEventListener('keydown', handleGlobalKeyboard);
   });
 
-  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, refreshPorts, onChunk, onError, downloadExcel, downloadPdf, openSessionFolder, onAnalysisComplete, onAnalysisError, closeAnalysisModal, openMetricModal, closeMetricModal, toggleMetricView };
+  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, exportAnalysis, onAnalysisComplete, onAnalysisError, showAlert, closeAlert, showLoading, hideLoading, openMetricModal, closeMetricModal, toggleMetricView, sortBlownInline };
 })();
 
 window._app = app;
+
+// Disable Enter and Space keys from triggering buttons
+  document.addEventListener('keydown', function(event) {
+    if (document.activeElement && document.activeElement.tagName === 'BUTTON') {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault(); // Stops the button from being clicked
+      }
+    }
+  });
+
 </script>
 </body>
 </html>
@@ -3849,4 +3804,4 @@ window = webview.create_window(
 )
 
 if __name__ == "__main__":
-  webview.start(gui="edgechromium", debug=True)
+  webview.start(gui="edgechromium", debug=False)
