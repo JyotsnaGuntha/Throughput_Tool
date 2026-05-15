@@ -946,14 +946,14 @@ body.light-theme .topbar {
   justify-content: center;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: all 0.3s ease;
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
   position: relative;
 }
 .theme-toggle:hover {
   background: rgba(255, 255, 255, 0.15);
   border-color: var(--blue);
   color: var(--blue-light);
-  transform: scale(1.05);
+  transform: translateY(-1px);
 }
 .theme-toggle:active {
   transform: scale(0.98);
@@ -973,7 +973,7 @@ body.light-theme .theme-toggle:hover {
 .theme-icon {
   width: 18px;
   height: 18px;
-  transition: all 0.3s ease;
+  transition: transform 0.25s ease, opacity 0.25s ease;
 }
 
 .theme-toggle:hover .theme-icon:not([style*="display: none"]) {
@@ -2614,20 +2614,20 @@ body.light-theme #analysisDetail .metric-detail-section {
       <span class="top-status-dot" id="usbStatusDot"></span>
       <span id="usbStatusText">Disconnected</span>
     </div>
-    <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme">
-      <svg class="theme-icon" id="sunIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="5"></circle>
-        <line x1="12" y1="1" x2="12" y2="3"></line>
-        <line x1="12" y1="21" x2="12" y2="23"></line>
-        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-        <line x1="1" y1="12" x2="3" y2="12"></line>
-        <line x1="21" y1="12" x2="23" y2="12"></line>
-        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    <button class="theme-toggle" id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme" onclick="window._app && window._app.toggleTheme()">
+      <svg class="theme-icon" id="sunIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2"></path>
+        <path d="M12 20v2"></path>
+        <path d="m4.93 4.93 1.41 1.41"></path>
+        <path d="m17.66 17.66 1.41 1.41"></path>
+        <path d="M2 12h2"></path>
+        <path d="M20 12h2"></path>
+        <path d="m6.34 17.66-1.41 1.41"></path>
+        <path d="m19.07 4.93-1.41 1.41"></path>
       </svg>
-      <svg class="theme-icon" id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+      <svg class="theme-icon" id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;" aria-hidden="true" focusable="false">
+        <path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"></path>
       </svg>
     </button>
   </div>
@@ -2637,7 +2637,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 
   <div class="main">
     <div class="analysis-dashboard">
-      <section class="analysis-card blown clickable" id="cardFrameBlown" onclick="app.toggleMetricView('frameBlown')">
+      <section class="analysis-card blown clickable" id="cardFrameBlown" onclick="window._app && window._app.toggleMetricView('frameBlown')">
         <div class="analysis-card-header">
           <div>
             <div class="analysis-card-title">Frames Blown</div>
@@ -2653,7 +2653,7 @@ body.light-theme #analysisDetail .metric-detail-section {
         <div class="analysis-card-chart"><canvas id="chartBlown"></canvas></div>
       </section>
 
-      <section class="analysis-card avg clickable" id="cardAvgTime" onclick="app.toggleMetricView('avgTime')">
+      <section class="analysis-card avg clickable" id="cardAvgTime" onclick="window._app && window._app.toggleMetricView('avgTime')">
         <div class="analysis-card-header">
           <div>
             <div class="analysis-card-title">Average Time</div>
@@ -2670,7 +2670,7 @@ body.light-theme #analysisDetail .metric-detail-section {
         <div class="analysis-card-chart"><canvas id="chartAvg"></canvas></div>
       </section>
 
-      <section class="analysis-card peak-time clickable" id="cardMaxTime" onclick="app.toggleMetricView('maxTime')">
+      <section class="analysis-card peak-time clickable" id="cardMaxTime" onclick="window._app && window._app.toggleMetricView('maxTime')">
         <div class="analysis-card-header">
           <div>
             <div class="analysis-card-title">Peak Time</div>
@@ -2687,7 +2687,7 @@ body.light-theme #analysisDetail .metric-detail-section {
         <div class="analysis-card-chart"><canvas id="chartPeakTime"></canvas></div>
       </section>
 
-      <section class="analysis-card peak-frame clickable" id="cardPeakFrame" onclick="app.toggleMetricView('peakFrame')">
+      <section class="analysis-card peak-frame clickable" id="cardPeakFrame" onclick="window._app && window._app.toggleMetricView('peakFrame')">
         <div class="analysis-card-header">
           <div>
             <div class="analysis-card-title">Peak Frame</div>
@@ -2717,7 +2717,7 @@ body.light-theme #analysisDetail .metric-detail-section {
         <span class="conn-field-label">COM Port</span>
         <div class="ctrl-row full">
           <select id="portSel"><option value="">No ports found</option></select>
-          <button class="btn-icon" id="btnRefresh" title="Refresh ports" onclick="app.refreshPorts()">
+          <button class="btn-icon" id="btnRefresh" title="Refresh ports" onclick="window._app && window._app.refreshPorts()">
             <svg id="refreshIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M1 8a7 7 0 1 0 2-4.9"/>
               <polyline points="1,3 1,8 6,8"/>
@@ -2737,7 +2737,7 @@ body.light-theme #analysisDetail .metric-detail-section {
       </div>
 
       <!-- Full-width Connect / Disconnect button -->
-      <button class="btn-connect" id="btnConn" onclick="app.toggleConnect()">Connect</button>
+      <button class="btn-connect" id="btnConn" onclick="window._app && window._app.toggleConnect()">Connect</button>
     </div>
 
     <!-- Analysis Section -->
@@ -2745,24 +2745,24 @@ body.light-theme #analysisDetail .metric-detail-section {
       <span class="ctrl-section-title">Analysis</span>
       
       <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-        <button class="btn-action start" id="btnStart" onclick="app.startAnalysis()" title="Start Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
+        <button class="btn-action start" id="btnStart" onclick="window._app && window._app.startAnalysis()" title="Start Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><polygon points="4,2 14,8 4,14"/></svg>
           Start
         </button>
         
-        <button class="btn-action stop" id="btnStop" onclick="app.stopAnalysis()" title="Stop Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
+        <button class="btn-action stop" id="btnStop" onclick="window._app && window._app.stopAnalysis()" title="Stop Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>
           Stop
         </button>
         
         <div class="hr" style="margin: 4px 0; flex: none;"></div>
         
-        <button class="btn-action analyze" id="btnAnalyze" onclick="app.analyze()" title="Run ML Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
+        <button class="btn-action analyze" id="btnAnalyze" onclick="window._app && window._app.analyze()" title="Run ML Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v2H3zm0 4h10v2H3zm0 4h7v2H3z"/></svg>
           Analyze
         </button>
         
-        <button class="btn-action download" id="btnDownloadExcel" onclick="app.exportAnalysis()" title="Export Analysis Report" style="flex: none; height: 40px; font-size: 13px;" disabled>
+        <button class="btn-action download" id="btnDownloadExcel" onclick="window._app && window._app.exportAnalysis()" title="Export Analysis Report" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 2v9M4 7l4 4 4-4"/><line x1="2" y1="14" x2="14" y2="14"/>
           </svg>
@@ -2782,7 +2782,7 @@ body.light-theme #analysisDetail .metric-detail-section {
             <div class="alert-title" id="alertTitle">Error</div>
         </div>
         <div class="alert-body" id="alertBody"></div>
-        <button class="alert-ok error" id="alertOk" onclick="app.closeAlert()">OK</button>
+        <button class="alert-ok error" id="alertOk" onclick="window._app && window._app.closeAlert()">OK</button>
     </div>
 </div>
 
@@ -2796,7 +2796,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 <!-- Metric Detail Modals -->
 <div class="modal-backdrop" id="frameBlownModal" role="presentation">
   <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="blownModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('frameBlownModal')" aria-label="Close Frames Blown details">×</button>
+    <button class="metric-modal-close-btn" onclick="window._app && window._app.closeMetricModal('frameBlownModal')" aria-label="Close Frames Blown details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">⚠️</div>
       <div>
@@ -2814,9 +2814,9 @@ body.light-theme #analysisDetail .metric-detail-section {
       <table class="metric-table">
         <thead>
           <tr>
-            <th class="sort-header" id="blownSortRankHeader" onclick="app.sortBlownFrames('rank')">Rank</th>
-            <th class="sort-header" id="blownSortFrameHeader" onclick="app.sortBlownFrames('frameIndex')">Frame #</th>
-            <th class="sort-header" id="blownSortTimeHeader" onclick="app.sortBlownFrames('timeUs')">Time (µs)</th>
+            <th class="sort-header" id="blownSortRankHeader" onclick="window._app && window._app.sortBlownFrames('rank')">Rank</th>
+            <th class="sort-header" id="blownSortFrameHeader" onclick="window._app && window._app.sortBlownFrames('frameIndex')">Frame #</th>
+            <th class="sort-header" id="blownSortTimeHeader" onclick="window._app && window._app.sortBlownFrames('timeUs')">Time (µs)</th>
           </tr>
         </thead>
         <tbody id="blownFramesList"></tbody>
@@ -2827,7 +2827,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 
 <div class="modal-backdrop" id="avgTimeModal" role="presentation">
   <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="avgTimeModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('avgTimeModal')" aria-label="Close Average Time details">×</button>
+    <button class="metric-modal-close-btn" onclick="window._app && window._app.closeMetricModal('avgTimeModal')" aria-label="Close Average Time details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">📊</div>
       <div>
@@ -2859,7 +2859,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 
 <div class="modal-backdrop" id="maxTimeModal" role="presentation">
   <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="maxTimeModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('maxTimeModal')" aria-label="Close Maximum Time details">×</button>
+    <button class="metric-modal-close-btn" onclick="window._app && window._app.closeMetricModal('maxTimeModal')" aria-label="Close Maximum Time details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">⏱️</div>
       <div>
@@ -2876,10 +2876,10 @@ body.light-theme #analysisDetail .metric-detail-section {
       <table class="metric-table">
         <thead>
           <tr>
-            <th class="sort-header" id="maxSortRankHeader" onclick="app.sortMaxFrames('rank')">Rank</th>
-            <th class="sort-header" id="maxSortFrameHeader" onclick="app.sortMaxFrames('frameIndex')">Frame #</th>
-            <th class="sort-header" id="maxSortTimeHeader" onclick="app.sortMaxFrames('timeUs')">Time (µs)</th>
-            <th class="sort-header" id="maxSortTimestampHeader" onclick="app.sortMaxFrames('timestamp')">Timestamp (s)</th>
+            <th class="sort-header" id="maxSortRankHeader" onclick="window._app && window._app.sortMaxFrames('rank')">Rank</th>
+            <th class="sort-header" id="maxSortFrameHeader" onclick="window._app && window._app.sortMaxFrames('frameIndex')">Frame #</th>
+            <th class="sort-header" id="maxSortTimeHeader" onclick="window._app && window._app.sortMaxFrames('timeUs')">Time (µs)</th>
+            <th class="sort-header" id="maxSortTimestampHeader" onclick="window._app && window._app.sortMaxFrames('timestamp')">Timestamp (s)</th>
           </tr>
         </thead>
         <tbody id="maxFramesList"></tbody>
@@ -2901,7 +2901,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 
 <div class="modal-backdrop" id="peakFrameModal" role="presentation">
   <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="peakFrameModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('peakFrameModal')" aria-label="Close Peak Frame details">×</button>
+    <button class="metric-modal-close-btn" onclick="window._app && window._app.closeMetricModal('peakFrameModal')" aria-label="Close Peak Frame details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">🎯</div>
       <div>
@@ -3098,33 +3098,67 @@ const app = (() => {
   }
 
   function setTheme(theme) {
+    console.log('[setTheme] Setting theme to:', theme);
     const isDark = theme === 'dark';
+    
+    // Apply theme class
     if (isDark) {
       document.body.classList.remove('light-theme');
     } else {
       document.body.classList.add('light-theme');
     }
+    console.log('[setTheme] body.classList after:', Array.from(document.body.classList));
+    
+    // Force style update by directly modifying body element
+    document.body.style.transition = 'background 0.3s ease, color 0.3s ease';
+    
     localStorage.setItem('theme', theme);
+    console.log('[setTheme] Saved to localStorage:', localStorage.getItem('theme'));
+    
     updateThemeIcons(isDark);
-    drawChart();
-    if (currentMetricShown) _refreshCurrentPanel();
+    
+    // Force browser repaint before chart redraw
+    setTimeout(() => {
+      console.log('[setTheme] Drawing chart after theme change');
+      requestAnimationFrame(() => {
+        drawChart();
+        if (currentMetricShown) _refreshCurrentPanel();
+      });
+    }, 50);
   }
 
   function toggleTheme() {
     const currentTheme = document.body.classList.contains('light-theme') ? 'light' : 'dark';
+    console.log('[toggleTheme] Current theme:', currentTheme);
     const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    console.log('[toggleTheme] Switching to:', newTheme);
     setTheme(newTheme);
   }
 
   function updateThemeIcons(isDark) {
     const sunIcon = document.getElementById('sunIcon');
     const moonIcon = document.getElementById('moonIcon');
+    const themeToggle = document.getElementById('themeToggle');
 
-    sunIcon.style.display = isDark ? 'block' : 'none';
-    moonIcon.style.display = isDark ? 'none' : 'block';
+    if (sunIcon) sunIcon.style.display = isDark ? 'block' : 'none';
+    if (moonIcon) moonIcon.style.display = isDark ? 'none' : 'block';
+    if (themeToggle) {
+      const nextTheme = isDark ? 'light' : 'dark';
+      const title = `Switch to ${nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1)} Theme`;
+      themeToggle.title = title;
+      themeToggle.setAttribute('aria-label', title);
+    }
   }
 
-  document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+  function bindThemeToggle() {
+    const themeToggle = document.getElementById('themeToggle');
+    if (!themeToggle || themeToggle.dataset.themeToggleBound === 'true') return;
+
+    themeToggle.addEventListener('click', toggleTheme);
+    themeToggle.dataset.themeToggleBound = 'true';
+  }
+
+  bindThemeToggle();
 
   function showAlert(title, body, type) {
     const overlay = document.getElementById("alertOverlay");
@@ -4043,6 +4077,7 @@ async function refreshPorts() {
 
   window.addEventListener('pywebviewready', () => {
     initTheme();
+    bindThemeToggle();
     refreshPorts();
     showAlert("Tool Ready", "Select a port and connect to begin.", "info");
     drawChart();
