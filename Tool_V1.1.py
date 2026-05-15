@@ -1384,7 +1384,7 @@ body.light-theme .analysis-dashboard {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--r);
@@ -1444,9 +1444,9 @@ body.light-theme .analysis-card:hover {
 
 .analysis-card-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -1461,59 +1461,7 @@ body.light-theme .analysis-card:hover {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
   flex-shrink: 0;
-}
-
-.analysis-card-badge {
-  padding: 5px 9px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
-
-.analysis-card-badge.blown {
-  color: #fecaca;
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.28);
-}
-
-.analysis-card-badge.avg {
-  color: #bbf7d0;
-  background: rgba(16, 185, 129, 0.12);
-  border-color: rgba(16, 185, 129, 0.28);
-}
-
-.analysis-card-badge.peak-time {
-  color: #fde68a;
-  background: rgba(245, 158, 11, 0.12);
-  border-color: rgba(245, 158, 11, 0.28);
-}
-
-.analysis-card-badge.peak-frame {
-  color: #bfdbfe;
-  background: rgba(59, 130, 246, 0.12);
-  border-color: rgba(59, 130, 246, 0.28);
-}
-
-body.light-theme .analysis-card-badge.blown {
-  color: #b91c1c;
-}
-
-body.light-theme .analysis-card-badge.avg {
-  color: #047857;
-}
-
-body.light-theme .analysis-card-badge.peak-time {
-  color: #b45309;
-}
-
-body.light-theme .analysis-card-badge.peak-frame {
-  color: #1d4ed8;
 }
 
 .analysis-legend {
@@ -2695,8 +2643,7 @@ body.light-theme #analysisDetail .metric-detail-section {
             <div class="analysis-card-title">Frames Blown</div>
           </div>
           <div class="analysis-card-meta">
-            <div class="analysis-card-badge blown" id="blownCardBadge">Blown rate</div>
-            <div class="analysis-card-value" id="blownCardValue">—</div>
+            <div class="analysis-card-value" id="blownCardValue">-</div>
           </div>
         </div>
         <div class="analysis-legend">
@@ -2712,8 +2659,7 @@ body.light-theme #analysisDetail .metric-detail-section {
             <div class="analysis-card-title">Average Time</div>
           </div>
           <div class="analysis-card-meta">
-            <div class="analysis-card-badge avg" id="avgCardBadge">Average</div>
-            <div class="analysis-card-value c-green" id="avgCardValue">—</div>
+            <div class="analysis-card-value c-green" id="avgCardValue">-</div>
           </div>
         </div>
         <div class="analysis-legend">
@@ -2730,8 +2676,7 @@ body.light-theme #analysisDetail .metric-detail-section {
             <div class="analysis-card-title">Peak Time</div>
           </div>
           <div class="analysis-card-meta">
-            <div class="analysis-card-badge peak-time" id="peakTimeCardBadge">Peak</div>
-            <div class="analysis-card-value c-amber" id="peakTimeCardValue">—</div>
+            <div class="analysis-card-value c-amber" id="peakTimeCardValue">-</div>
           </div>
         </div>
         <div class="analysis-legend">
@@ -2748,8 +2693,7 @@ body.light-theme #analysisDetail .metric-detail-section {
             <div class="analysis-card-title">Peak Frame</div>
           </div>
           <div class="analysis-card-meta">
-            <div class="analysis-card-badge peak-frame" id="peakFrameCardBadge">Top frame</div>
-            <div class="analysis-card-value c-blue" id="peakFrameCardValue">—</div>
+            <div class="analysis-card-value c-blue" id="peakFrameCardValue">-</div>
           </div>
         </div>
         <div class="analysis-legend">
@@ -3333,9 +3277,6 @@ async function refreshPorts() {
 
       _setText('blownCardValue', blown.toLocaleString());
       _setText('blownCardFoot', total > 0 ? `${safe.toLocaleString()} normal / ${blown.toLocaleString()} blown` : 'Waiting for live data');
-      const badge = document.getElementById('blownCardBadge');
-      if (badge) badge.textContent = total > 0 ? `${pct.toFixed(1)}% blown` : 'Blown rate';
-
       if (total <= 0) {
         _drawCanvasPlaceholder(ctx, W, H, 'No live frames yet', 'Start analysis to populate this donut', isLightTheme);
         return;
@@ -3388,16 +3329,6 @@ async function refreshPorts() {
 
       _setText('avgCardValue', `${avgUs.toLocaleString()} µs`);
       _setText('avgCardFoot', frameCount > 0 ? `${frameCount.toLocaleString()} frames sampled` : 'Waiting for live data');
-      const badge = document.getElementById('avgCardBadge');
-      if (badge) {
-        let label = 'Average';
-        if (avgUs < 500) label = 'Excellent';
-        else if (avgUs < 1000) label = 'Good';
-        else if (avgUs < 1500) label = 'Watch';
-        else label = 'Elevated';
-        badge.textContent = label;
-      }
-
       if (!avgs || avgs.length < 2) {
         _drawCanvasPlaceholder(ctx, W, H, 'No average trace yet', 'The per-frame latency line will appear here', isLightTheme);
         return;
@@ -3489,9 +3420,6 @@ async function refreshPorts() {
 
       _setText('peakTimeCardValue', `${sessionMax.toLocaleString()} µs`);
       _setText('peakTimeCardFoot', over > 0 ? `+${over.toLocaleString()} µs over threshold` : 'Within threshold');
-      const badge = document.getElementById('peakTimeCardBadge');
-      if (badge) badge.textContent = over > 0 ? 'Over threshold' : 'Within range';
-
       if (sessionMax <= 0) {
         _drawCanvasPlaceholder(ctx, W, H, 'No peak time yet', 'The gauge will fill as frames arrive', isLightTheme);
         return;
@@ -3562,9 +3490,6 @@ async function refreshPorts() {
 
       _setText('peakFrameCardValue', `Frame ${peakFrame.toLocaleString()}`);
       _setText('peakFrameCardFoot', peakTime > 0 ? `${peakTime.toLocaleString()} µs peak` : 'Waiting for live data');
-      const badge = document.getElementById('peakFrameCardBadge');
-      if (badge) badge.textContent = peakFrame > 0 || peakTime > 0 ? `Frame ${peakFrame.toLocaleString()}` : 'Top frame';
-
       if (!topFrames || topFrames.length === 0) {
         _drawCanvasPlaceholder(ctx, W, H, 'No peak frame yet', 'Top-ranked frames will appear here', isLightTheme);
         return;
