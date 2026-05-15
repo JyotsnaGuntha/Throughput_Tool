@@ -1364,6 +1364,235 @@ body.light-theme input[type=text]:focus {
   overflow: hidden; 
 }
 
+.analysis-dashboard {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 18px 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  background: linear-gradient(135deg, var(--bg-main) 0%, rgba(42, 50, 63, 0.8) 100%);
+  overflow: hidden;
+}
+
+body.light-theme .analysis-dashboard {
+  background: #ffffff;
+}
+
+.analysis-card {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: linear-gradient(135deg, var(--surface) 0%, rgba(42, 50, 63, 0.6) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.analysis-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+  pointer-events: none;
+}
+
+.analysis-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+}
+
+.analysis-card.blown {
+  border-top: 2px solid rgba(239, 68, 68, 0.85);
+}
+
+.analysis-card.avg {
+  border-top: 2px solid rgba(16, 185, 129, 0.85);
+}
+
+.analysis-card.peak-time {
+  border-top: 2px solid rgba(245, 158, 11, 0.9);
+}
+
+.analysis-card.peak-frame {
+  border-top: 2px solid rgba(59, 130, 246, 0.9);
+}
+
+body.light-theme .analysis-card {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+body.light-theme .analysis-card::before {
+  background: transparent;
+}
+
+body.light-theme .analysis-card:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.12);
+}
+
+.analysis-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.analysis-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: var(--text-primary);
+}
+
+.analysis-card-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.analysis-card-badge {
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.analysis-card-badge.blown {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.analysis-card-badge.avg {
+  color: #bbf7d0;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.28);
+}
+
+.analysis-card-badge.peak-time {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.analysis-card-badge.peak-frame {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+body.light-theme .analysis-card-badge.blown {
+  color: #b91c1c;
+}
+
+body.light-theme .analysis-card-badge.avg {
+  color: #047857;
+}
+
+body.light-theme .analysis-card-badge.peak-time {
+  color: #b45309;
+}
+
+body.light-theme .analysis-card-badge.peak-frame {
+  color: #1d4ed8;
+}
+
+.analysis-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  flex-shrink: 0;
+}
+
+.analysis-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.analysis-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.analysis-legend-swatch.line {
+  width: 14px;
+  height: 2px;
+  border-radius: 999px;
+}
+
+.analysis-card-chart {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.10) 100%);
+  overflow: hidden;
+}
+
+body.light-theme .analysis-card-chart {
+  background: #ffffff;
+  border-color: #e5e7eb;
+}
+
+.analysis-card-chart canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.analysis-card-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .analysis-dashboard {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .analysis-dashboard {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .analysis-card {
+    padding: 14px;
+  }
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -2459,270 +2688,77 @@ body.light-theme #analysisDetail .metric-detail-section {
 <div class="layout">
 
   <div class="main">
-    <div class="stats">
-      <div class="scard clickable" id="cardFrameBlown" onclick="app.toggleMetricView('frameBlown')">
-        <div class="scard-lbl">Frames Blown</div>
-        <div class="scard-val c-red" id="svBlown">—</div>
-      </div>
-      <div class="scard clickable" id="cardAvgTime" onclick="app.toggleMetricView('avgTime')">
-        <div class="scard-lbl">Average Time</div>
-        <div class="scard-val c-green" id="svAvg">—</div>
-        <div class="scard-unit">microseconds</div>
-      </div>
-      <div class="scard clickable" id="cardMaxTime" onclick="app.toggleMetricView('maxTime')">
-        <div class="scard-lbl">Maximum Time</div>
-        <div class="scard-val c-amber" id="svMaxTime">—</div>
-        <div class="scard-unit">microseconds</div>
-      </div>
-      <div class="scard clickable" id="cardPeakFrame" onclick="app.toggleMetricView('peakFrame')">
-        <div class="scard-lbl">Peak Frame</div>
-        <div class="scard-val c-blue" id="svMaxFrame">—</div>
-      </div>
-    </div>
-
-    <!-- Chart area -->
-    <div class="chart-area">
-      <div class="chart-hdr">
-        <span class="chart-ttl">Analysis Data View</span>
-        <div class="legend">
-          <div class="leg-item"><div class="leg-sq ok"></div>Normal (&le;2000µs)</div>
-          <div class="leg-item"><div class="leg-sq blown"></div>Blown (&gt;2000µs)</div>
-          <div class="leg-item"><div class="leg-ln"></div>2000µs threshold</div>
-        </div>
-      </div>
-      <div id="chartView" class="chart-box"><canvas id="chart"></canvas></div>
-      <div id="analysisDetail" style="display: none;">
-
-        <!-- ══ 1. FRAMES BLOWN DASHBOARD ══════════════════════════════ -->
-        <div class="metric-modal-card" id="inline_frameBlown" style="display:none;">
-          <div class="metric-modal-header">
-            <div class="metric-modal-icon">⚠️</div>
-            <div style="flex:1;">
-              <div class="metric-modal-title" id="inline_blownModalTitle">Frames Blown</div>
-              <div class="metric-modal-subtitle">Real-time Threshold Exceedance Monitor</div>
-            </div>
+    <div class="analysis-dashboard">
+      <section class="analysis-card blown clickable" id="cardFrameBlown" onclick="app.toggleMetricView('frameBlown')">
+        <div class="analysis-card-header">
+          <div>
+            <div class="analysis-card-title">Frames Blown</div>
           </div>
-
-          <!-- KPI strip -->
-          <div class="dash-hero-grid">
-            <div class="dash-kpi c-red">
-              <div class="dash-kpi-lbl">Total Blown</div>
-              <div class="dash-kpi-val c-red" id="ib_totalBlown">—</div>
-              <div class="dash-kpi-sub">frames > 2000 µs</div>
-            </div>
-            <div class="dash-kpi c-amber">
-              <div class="dash-kpi-lbl">% of Frames</div>
-              <div class="dash-kpi-val c-amber" id="ib_blownPct">—</div>
-              <div class="dash-kpi-sub">exceedance rate</div>
-            </div>
-            <div class="dash-kpi c-purple">
-              <div class="dash-kpi-lbl">Last Blown</div>
-              <div class="dash-kpi-val c-purple" id="ib_lastBlownSec">—</div>
-              <div class="dash-kpi-sub">second of session</div>
-            </div>
-          </div>
-
-          <!-- Live table -->
-          <div class="dash-section">
-            <div class="dash-section-title">
-              <span class="live-dot"></span>
-              All Blown Frames — <span id="ib_blownCount">0</span> total
-              <span style="margin-left:auto; display:flex; gap:6px;">
-                <button onclick="app.sortBlownInline('frameIndex')" id="ib_sortFrameBtn"
-                  style="background:rgba(59,130,246,0.1);border:1px solid var(--border);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--text-secondary);cursor:pointer;">Frame #</button>
-                <button onclick="app.sortBlownInline('second')" id="ib_sortSecBtn"
-                  style="background:rgba(59,130,246,0.1);border:1px solid var(--border);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--text-secondary);cursor:pointer;">Second</button>
-                <button onclick="app.sortBlownInline('timeUs')" id="ib_sortTimeBtn"
-                  style="background:rgba(59,130,246,0.15);border:1px solid var(--blue);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--blue-light);cursor:pointer;">Time ▼</button>
-              </span>
-            </div>
-            <table class="dash-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Frame #</th>
-                  <th>Second</th>
-                  <th>Time (µs)</th>
-                  <th>Severity</th>
-                </tr>
-              </thead>
-              <tbody id="ib_blownBody"></tbody>
-            </table>
+          <div class="analysis-card-meta">
+            <div class="analysis-card-badge blown" id="blownCardBadge">Blown rate</div>
+            <div class="analysis-card-value" id="blownCardValue">—</div>
           </div>
         </div>
+        <div class="analysis-legend">
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: linear-gradient(135deg, var(--blue) 0%, var(--blue-light) 100%);"></span>Normal (&le; 2000µs)</div>
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: linear-gradient(135deg, var(--red) 0%, var(--red-light) 100%);"></span>Blown (&gt; 2000µs)</div>
+        </div>
+        <div class="analysis-card-chart"><canvas id="chartBlown"></canvas></div>
+      </section>
 
-        <!-- ══ 2. AVERAGE TIME DASHBOARD ═══════════════════════════════ -->
-        <div class="metric-modal-card" id="inline_avgTime" style="display:none;">
-          <div class="metric-modal-header">
-            <div class="metric-modal-icon">📊</div>
-            <div style="flex:1;">
-              <div class="metric-modal-title">Average Time</div>
-              <div class="metric-modal-subtitle">Mean Processing Latency — Live per-Frame Analysis</div>
-            </div>
+      <section class="analysis-card avg clickable" id="cardAvgTime" onclick="app.toggleMetricView('avgTime')">
+        <div class="analysis-card-header">
+          <div>
+            <div class="analysis-card-title">Average Time</div>
           </div>
-
-          <!-- KPI strip -->
-          <div class="dash-hero-grid">
-            <div class="dash-kpi c-green">
-              <div class="dash-kpi-lbl">Overall Average</div>
-              <div class="dash-kpi-val c-green" id="ib_avgOverall">—</div>
-              <div class="dash-kpi-sub">µs across all frames</div>
-            </div>
-            <div class="dash-kpi c-blue">
-              <div class="dash-kpi-lbl">Frame Count</div>
-              <div class="dash-kpi-val c-blue" id="ib_avgFrameCount">—</div>
-              <div class="dash-kpi-sub">total samples seen</div>
-            </div>
-            <div class="dash-kpi c-purple">
-              <div class="dash-kpi-lbl">Status</div>
-              <div id="ib_avgBadge" class="dash-badge excellent" style="margin-top:6px;">Excellent</div>
-            </div>
-          </div>
-
-          <!-- Per-frame sparkline -->
-          <div class="dash-section">
-            <div class="dash-section-title">
-              <span class="live-dot"></span>
-              Per-Frame Average (0 → 499)
-            </div>
-            <div class="avg-canvas-wrap">
-              <canvas class="avg-canvas" id="ib_avgCanvas"></canvas>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-top:4px;">
-              <span style="font-size:9px;color:var(--text-muted);">Frame 0</span>
-              <span style="font-size:9px;color:var(--text-muted);text-align:center;">--- 2000 µs threshold ---</span>
-              <span style="font-size:9px;color:var(--text-muted);">Frame 499</span>
-            </div>
-          </div>
-
-          <!-- Top 10 highest average frames -->
-          <div class="dash-section">
-            <div class="dash-section-title">Top 10 Highest-Average Frames</div>
-            <table class="dash-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Frame #</th>
-                  <th>Avg Time (µs)</th>
-                  <th>vs Overall</th>
-                  <th>Bar</th>
-                </tr>
-              </thead>
-              <tbody id="ib_avgTopBody"></tbody>
-            </table>
+          <div class="analysis-card-meta">
+            <div class="analysis-card-badge avg" id="avgCardBadge">Average</div>
+            <div class="analysis-card-value c-green" id="avgCardValue">—</div>
           </div>
         </div>
+        <div class="analysis-legend">
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch line" style="background: var(--blue-light);"></span>Average trend</div>
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch line" style="background: var(--amber);"></span>2000µs threshold</div>
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--red-light);"></span>Above threshold</div>
+        </div>
+        <div class="analysis-card-chart"><canvas id="chartAvg"></canvas></div>
+      </section>
 
-        <!-- ══ 3. MAX TIME DASHBOARD ════════════════════════════════════ -->
-        <div class="metric-modal-card" id="inline_maxTime" style="display:none;">
-          <div class="metric-modal-header">
-            <div class="metric-modal-icon">⏱️</div>
-            <div style="flex:1;">
-              <div class="metric-modal-title">Maximum Time</div>
-              <div class="metric-modal-subtitle">Peak Latency Tracker — Top 10 All-Time Highs</div>
-            </div>
+      <section class="analysis-card peak-time clickable" id="cardMaxTime" onclick="app.toggleMetricView('maxTime')">
+        <div class="analysis-card-header">
+          <div>
+            <div class="analysis-card-title">Peak Time</div>
           </div>
-
-          <!-- KPI strip -->
-          <div class="dash-hero-grid">
-            <div class="dash-kpi c-amber">
-              <div class="dash-kpi-lbl">Session Max</div>
-              <div class="dash-kpi-val c-amber" id="ib_maxValue">—</div>
-              <div class="dash-kpi-sub">µs — all-time peak</div>
-            </div>
-            <div class="dash-kpi c-red">
-              <div class="dash-kpi-lbl">Over Threshold</div>
-              <div class="dash-kpi-val c-red" id="ib_maxExceed">—</div>
-              <div class="dash-kpi-sub">µs above 2000</div>
-            </div>
-            <div class="dash-kpi c-blue">
-              <div class="dash-kpi-lbl">Reached at Second</div>
-              <div class="dash-kpi-val c-blue" id="ib_maxSecond">—</div>
-              <div class="dash-kpi-sub">session timestamp</div>
-            </div>
-          </div>
-
-          <!-- Top 10 table -->
-          <div class="dash-section">
-            <div class="dash-section-title">
-              <span class="live-dot"></span>
-              Top 10 Highest Processing Times
-            </div>
-            <table class="dash-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Frame #</th>
-                  <th>Second</th>
-                  <th>Time (µs)</th>
-                  <th>Severity Bar</th>
-                </tr>
-              </thead>
-              <tbody id="ib_maxBody"></tbody>
-            </table>
+          <div class="analysis-card-meta">
+            <div class="analysis-card-badge peak-time" id="peakTimeCardBadge">Peak</div>
+            <div class="analysis-card-value c-amber" id="peakTimeCardValue">—</div>
           </div>
         </div>
+        <div class="analysis-legend">
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--green-light);"></span>Safe zone</div>
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--amber);"></span>Warning zone</div>
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--red-light);"></span>Critical zone</div>
+        </div>
+        <div class="analysis-card-chart"><canvas id="chartPeakTime"></canvas></div>
+      </section>
 
-        <!-- ══ 4. PEAK FRAME DASHBOARD ══════════════════════════════════ -->
-        <div class="metric-modal-card" id="inline_peakFrame" style="display:none;">
-          <div class="metric-modal-header">
-            <div class="metric-modal-icon">🎯</div>
-            <div style="flex:1;">
-              <div class="metric-modal-title">Peak Frame</div>
-              <div class="metric-modal-subtitle">Top 10 Frames by Maximum Processing Time</div>
-            </div>
+      <section class="analysis-card peak-frame clickable" id="cardPeakFrame" onclick="app.toggleMetricView('peakFrame')">
+        <div class="analysis-card-header">
+          <div>
+            <div class="analysis-card-title">Peak Frame</div>
           </div>
-
-          <!-- Hero frame card -->
-          <div class="dash-hero-frame">
-            <div class="dash-hero-frame-icon">🏆</div>
-            <div>
-              <div class="dash-hero-frame-num" id="ib_peakHeroNum">Frame —</div>
-              <div class="dash-hero-frame-label" id="ib_peakHeroTime">— µs — absolute session peak</div>
-            </div>
-            <div style="margin-left:auto;" id="ib_peakHeroBadge"></div>
-          </div>
-
-          <!-- KPI strip -->
-          <div class="dash-hero-grid">
-            <div class="dash-kpi c-blue">
-              <div class="dash-kpi-lbl">Peak Frame #</div>
-              <div class="dash-kpi-val c-blue" id="ib_peakFrameNum">—</div>
-              <div class="dash-kpi-sub">index 0–499</div>
-            </div>
-            <div class="dash-kpi c-amber">
-              <div class="dash-kpi-lbl">Peak Time</div>
-              <div class="dash-kpi-val c-amber" id="ib_peakFrameTime">—</div>
-              <div class="dash-kpi-sub">µs maximum</div>
-            </div>
-            <div class="dash-kpi c-red">
-              <div class="dash-kpi-lbl">Threshold Status</div>
-              <div id="ib_peakStatus" class="dash-badge critical" style="margin-top:6px;">⚠️ Blown</div>
-            </div>
-          </div>
-
-          <!-- Top 10 peak frames table -->
-          <div class="dash-section">
-            <div class="dash-section-title">
-              <span class="live-dot"></span>
-              Top 10 Peak Frames
-            </div>
-            <table class="dash-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Frame #</th>
-                  <th>Second</th>
-                  <th>Time (µs)</th>
-                  <th>Threshold</th>
-                </tr>
-              </thead>
-              <tbody id="ib_peakBody"></tbody>
-            </table>
+          <div class="analysis-card-meta">
+            <div class="analysis-card-badge peak-frame" id="peakFrameCardBadge">Top frame</div>
+            <div class="analysis-card-value c-blue" id="peakFrameCardValue">—</div>
           </div>
         </div>
-
-      </div>
+        <div class="analysis-legend">
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--amber);"></span>Peak frame</div>
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--blue-light);"></span>Other top frames</div>
+          <div class="analysis-legend-item"><span class="analysis-legend-swatch line" style="background: var(--red-light);"></span>2000µs threshold</div>
+        </div>
+        <div class="analysis-card-chart"><canvas id="chartPeakFrame"></canvas></div>
+      </section>
     </div>
   </div>
 
@@ -3089,8 +3125,6 @@ function drawChart() {
     }
   });
 }
-new ResizeObserver(drawChart).observe(document.querySelector('.chart-box'));
-
 // ── App controller ─────────────────────────────────────────────────────────────
 const app = (() => {
   let connected = false, running = false, canExport = false, canAnalyze = false, canDownloadExcel = false, analysisRunning = false;
@@ -3129,6 +3163,7 @@ const app = (() => {
     localStorage.setItem('theme', theme);
     updateThemeIcons(isDark);
     drawChart();
+    if (currentMetricShown) _refreshCurrentPanel();
   }
 
   function toggleTheme() {
@@ -3206,15 +3241,11 @@ const app = (() => {
   }
 
   function showChartView() {
-    const chartView = document.getElementById('chartView');
-    const analysisDetail = document.getElementById('analysisDetail');
-    chartView.style.display = 'block';
-    analysisDetail.style.display = 'none';
-    ['frameBlown','avgTime','maxTime','peakFrame','generic'].forEach(k => {
-      const el = document.getElementById(k === 'generic' ? 'inline_generic' : 'inline_' + k);
-      if (el) el.style.display = 'none';
-    });
+    if (currentOpenModal && currentOpenModal.id.endsWith('Modal')) {
+      closeMetricModal(currentOpenModal.id);
+    }
     currentMetricShown = null;
+    drawChart();
   }
 
   function setStats(blown, avgUs, maxUs, maxFrame) {
@@ -3243,137 +3274,359 @@ const app = (() => {
       metricData.blownFrames = metricData.allFrames
         .filter(f => f.isBlown)
         .sort((a, b) => b.timeUs - a.timeUs);
+    } else {
+      metricData.frameCount = 0;
+      metricData.totalTime = 0;
+      metricData.allFrames = [];
+      metricData.maxFrames = [];
+      metricData.blownFrames = [];
     }
   }
 
 async function refreshPorts() {
-    const icon = document.getElementById('refreshIcon');
-    icon.classList.add('spin');
-    const ports = JSON.parse(await window.pywebview.api.get_ports());
-    icon.classList.remove('spin');
-    
-    const sel = document.getElementById('portSel');
-    const prev = sel.value;
-    
-    if (ports.length === 0) {
-      sel.innerHTML = '<option value="">No USB ports found</option>';
-    } else {
-      sel.innerHTML = ''; // Clear existing options
-      
-      // Populate the dropdown with USB ports
-      ports.forEach(p => {
-        const o = document.createElement('option');
-        o.value = o.textContent = p;
-        sel.appendChild(o);
-      });
-      
-      // Auto-select logic: 
-      // Keep the previous selection if it's still plugged in, 
-      // otherwise default to the first USB port in the list.
-      if (ports.includes(prev)) {
-        sel.value = prev;
-      } else {
-        sel.value = ports[0];
-      }
-    }
-  }
+    function _prepareDashboardCanvas(canvas) {
+      if (!canvas || !canvas.parentElement) return null;
+      const box = canvas.parentElement.getBoundingClientRect();
+      const W = Math.max(0, box.width);
+      const H = Math.max(0, box.height);
+      if (W === 0 || H === 0) return null;
 
-  async function toggleConnect() {
-    if (connected) {
-      // FIX: Check backend response before aggressively tearing down the UI state
-      const r = JSON.parse(await window.pywebview.api.disconnect());
-      if (r.status === 'error') {
-        showAlert("Action Denied", r.message, "warning");
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      return { ctx, W, H, isLightTheme: document.body.classList.contains('light-theme') };
+    }
+
+    function _drawCanvasPlaceholder(ctx, W, H, title, subtitle, isLightTheme) {
+      ctx.save();
+      ctx.fillStyle = isLightTheme ? '#6b7280' : '#8a8f9f';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = "600 14px 'Inter', sans-serif";
+      ctx.fillText(title, W / 2, H / 2 - 8);
+      ctx.font = "11px 'Inter', sans-serif";
+      ctx.fillText(subtitle, W / 2, H / 2 + 12);
+      ctx.restore();
+    }
+
+    function drawChart() {
+      _drawBlownDashboardCard();
+      _drawAverageDashboardCard();
+      _drawPeakTimeDashboardCard();
+      _drawPeakFrameDashboardCard();
+    }
+
+    function _drawBlownDashboardCard() {
+      const canvas = document.getElementById('chartBlown');
+      const state = _prepareDashboardCanvas(canvas);
+      if (!state) return;
+
+      const { ctx, W, H, isLightTheme } = state;
+      const frameCount = metricData.frameCount || (latestChunk && latestChunk.length) || 0;
+      const blown = Number(metricData.blown || 0);
+      const safe = Math.max(0, frameCount - blown);
+      const total = Math.max(0, blown + safe);
+      const pct = total > 0 ? (blown / total) * 100 : 0;
+
+      _setText('blownCardValue', blown.toLocaleString());
+      _setText('blownCardFoot', total > 0 ? `${safe.toLocaleString()} normal / ${blown.toLocaleString()} blown` : 'Waiting for live data');
+      const badge = document.getElementById('blownCardBadge');
+      if (badge) badge.textContent = total > 0 ? `${pct.toFixed(1)}% blown` : 'Blown rate';
+
+      if (total <= 0) {
+        _drawCanvasPlaceholder(ctx, W, H, 'No live frames yet', 'Start analysis to populate this donut', isLightTheme);
         return;
       }
-      
-      connected = false; running = false; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
-      updateUsbStatus(false);
-      showAlert("Disconnected", "Successfully disconnected from the port.", "warning");
-    } else {
-      const port = document.getElementById('portSel').value;
-      const baud = document.getElementById('baudSel').value;
-      if (!port) { showAlert("Warning", "Select a COM port first.", "warning"); return; }
-      const r = JSON.parse(await window.pywebview.api.connect(port, baud));
-      if (r.status === 'ok') {
-        connected = true;
-        updateUsbStatus(true);
-      } else {
-        updateUsbStatus(false);
-        showAlert("Connection Failed", r.message, "error");
+
+      const cx = W / 2;
+      const cy = H / 2 + 4;
+      const radius = Math.min(W, H) * 0.28;
+      const lineWidth = Math.max(18, Math.min(W, H) * 0.14);
+      const start = -Math.PI / 2;
+      const blownAngle = (Math.PI * 2) * (blown / total);
+
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+
+      ctx.strokeStyle = isLightTheme ? '#2563eb' : '#60a5fa';
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, start + blownAngle, start + Math.PI * 2, false);
+      ctx.stroke();
+
+      ctx.strokeStyle = isLightTheme ? '#dc2626' : '#ef4444';
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, start, start + blownAngle, false);
+      ctx.stroke();
+
+      ctx.fillStyle = isLightTheme ? '#ffffff' : 'rgba(15, 23, 42, 0.98)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(0, radius - lineWidth / 2 - 2), 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = isLightTheme ? '#111827' : '#f8fafc';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = "700 24px 'JetBrains Mono', monospace";
+      ctx.fillText(blown.toLocaleString(), cx, cy - 8);
+      ctx.font = "11px 'Inter', sans-serif";
+      ctx.fillStyle = isLightTheme ? '#6b7280' : '#94a3b8';
+      ctx.fillText(`${pct.toFixed(1)}% of frames`, cx, cy + 14);
+    }
+
+    function _drawAverageDashboardCard() {
+      const canvas = document.getElementById('chartAvg');
+      const state = _prepareDashboardCanvas(canvas);
+      if (!state) return;
+
+      const { ctx, W, H, isLightTheme } = state;
+      const avgs = metricData.frameAvgs || [];
+      const avgUs = Number(metricData.avgUs || 0);
+      const frameCount = metricData.frameCount || avgs.length || 0;
+
+      _setText('avgCardValue', `${avgUs.toLocaleString()} µs`);
+      _setText('avgCardFoot', frameCount > 0 ? `${frameCount.toLocaleString()} frames sampled` : 'Waiting for live data');
+      const badge = document.getElementById('avgCardBadge');
+      if (badge) {
+        let label = 'Average';
+        if (avgUs < 500) label = 'Excellent';
+        else if (avgUs < 1000) label = 'Good';
+        else if (avgUs < 1500) label = 'Watch';
+        else label = 'Elevated';
+        badge.textContent = label;
       }
+
+      if (!avgs || avgs.length < 2) {
+        _drawCanvasPlaceholder(ctx, W, H, 'No average trace yet', 'The per-frame latency line will appear here', isLightTheme);
+        return;
+      }
+
+      const pad = { t: 14, r: 16, b: 26, l: 44 };
+      const iW = W - pad.l - pad.r;
+      const iH = H - pad.t - pad.b;
+      const maxVal = Math.max(...avgs, THRESHOLD_US * 1.15);
+
+      for (let p = 0; p <= 100; p += 25) {
+        const y = pad.t + iH - (p / 100) * iH;
+        ctx.strokeStyle = isLightTheme ? 'rgba(148, 163, 184, 0.25)' : 'rgba(80, 88, 112, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(pad.l + iW, y);
+        ctx.stroke();
+      }
+
+      const thresholdY = pad.t + iH - (THRESHOLD_US / maxVal) * iH;
+      ctx.strokeStyle = isLightTheme ? '#d97706' : '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pad.l, thresholdY);
+      ctx.lineTo(pad.l + iW, thresholdY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const points = avgs.map((value, index) => ({
+        x: pad.l + (index / (avgs.length - 1)) * iW,
+        y: pad.t + iH - (value / maxVal) * iH,
+        value
+      }));
+
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, pad.t + iH);
+      points.forEach(point => ctx.lineTo(point.x, point.y));
+      ctx.lineTo(points[points.length - 1].x, pad.t + iH);
+      ctx.closePath();
+      const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + iH);
+      grad.addColorStop(0, isLightTheme ? 'rgba(37, 99, 235, 0.24)' : 'rgba(59, 130, 246, 0.28)');
+      grad.addColorStop(1, isLightTheme ? 'rgba(37, 99, 235, 0.02)' : 'rgba(59, 130, 246, 0.02)');
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+      ctx.strokeStyle = isLightTheme ? '#2563eb' : '#60a5fa';
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      ctx.fillStyle = isLightTheme ? '#dc2626' : '#ef4444';
+      points.forEach(point => {
+        if (point.value > THRESHOLD_US) {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+
+      ctx.fillStyle = isLightTheme ? '#6b7280' : '#8a8f9f';
+      ctx.font = "10px 'JetBrains Mono', monospace";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('Frame 0', pad.l, H - 4);
+      ctx.textAlign = 'right';
+      ctx.fillText(`Frame ${avgs.length - 1}`, pad.l + iW, H - 4);
     }
-    sync();
-  }
 
-  async function startAnalysis() {
-    const r = JSON.parse(await window.pywebview.api.start_analysis());
-    if (r.status === 'ok') {
-      running = true; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
-      latestChunk = null;
-      metricData.blownFramesList = [];
-      metricData.frameAvgs = [];
-      metricData.top10 = [];
-      showChartView();
-      setStats(0, 0, 0, 0); drawChart();
-      showAlert("Analysis Started", "Receiving chunks every second...", "info");
-    } else {
-      showAlert("Start Failed", r.message, "error");
+    function _drawPeakTimeDashboardCard() {
+      const canvas = document.getElementById('chartPeakTime');
+      const state = _prepareDashboardCanvas(canvas);
+      if (!state) return;
+
+      const { ctx, W, H, isLightTheme } = state;
+      const sessionMax = Number(metricData.maxUs || 0);
+      const over = sessionMax - THRESHOLD_US;
+      const scaleMax = Math.max(THRESHOLD_US * 1.75, sessionMax * 1.2, THRESHOLD_US + 500);
+      const ratio = scaleMax > 0 ? Math.min(sessionMax / scaleMax, 1) : 0;
+      const thresholdRatio = Math.min(THRESHOLD_US / scaleMax, 1);
+      const warningRatio = Math.min((THRESHOLD_US * 1.25) / scaleMax, 1);
+
+      _setText('peakTimeCardValue', `${sessionMax.toLocaleString()} µs`);
+      _setText('peakTimeCardFoot', over > 0 ? `+${over.toLocaleString()} µs over threshold` : 'Within threshold');
+      const badge = document.getElementById('peakTimeCardBadge');
+      if (badge) badge.textContent = over > 0 ? 'Over threshold' : 'Within range';
+
+      if (sessionMax <= 0) {
+        _drawCanvasPlaceholder(ctx, W, H, 'No peak time yet', 'The gauge will fill as frames arrive', isLightTheme);
+        return;
+      }
+
+      const cx = W / 2;
+      const cy = H * 0.78;
+      const radius = Math.min(W * 0.36, H * 0.42);
+      const start = Math.PI * 1.05;
+      const end = Math.PI * 1.95;
+      const sweep = end - start;
+      const lineWidth = Math.max(14, Math.min(W, H) * 0.08);
+
+      ctx.lineCap = 'round';
+      ctx.lineWidth = lineWidth;
+      ctx.strokeStyle = isLightTheme ? 'rgba(148, 163, 184, 0.20)' : 'rgba(80, 88, 112, 0.35)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, start, end, false);
+      ctx.stroke();
+
+      const drawArcSegment = (fromRatio, toRatio, color) => {
+        if (toRatio <= fromRatio) return;
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, start + sweep * fromRatio, start + sweep * toRatio, false);
+        ctx.stroke();
+      };
+
+      drawArcSegment(0, Math.min(thresholdRatio, 1), isLightTheme ? '#10b981' : '#34d399');
+      drawArcSegment(thresholdRatio, Math.min(warningRatio, 1), isLightTheme ? '#f59e0b' : '#fbbf24');
+      drawArcSegment(warningRatio, ratio, isLightTheme ? '#dc2626' : '#ef4444');
+
+      const needleAngle = start + sweep * ratio;
+      const needleX = cx + Math.cos(needleAngle) * (radius - lineWidth * 0.35);
+      const needleY = cy + Math.sin(needleAngle) * (radius - lineWidth * 0.35);
+      ctx.strokeStyle = isLightTheme ? '#2563eb' : '#60a5fa';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(needleX, needleY);
+      ctx.stroke();
+
+      ctx.fillStyle = isLightTheme ? '#2563eb' : '#60a5fa';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = isLightTheme ? '#111827' : '#f8fafc';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = "700 22px 'JetBrains Mono', monospace";
+      ctx.fillText(sessionMax.toLocaleString(), cx, cy - 28);
+      ctx.font = "11px 'Inter', sans-serif";
+      ctx.fillStyle = isLightTheme ? '#6b7280' : '#94a3b8';
+      ctx.fillText('2000 µs threshold', cx, cy - 8);
+      ctx.fillText(over > 0 ? `Over by ${over.toLocaleString()} µs` : 'Within threshold', cx, cy + 10);
     }
-    sync();
-  }
 
-  async function stopAnalysis() {
-    const r = JSON.parse(await window.pywebview.api.stop_analysis());
-    running = false;
-    if (r.status === 'ok') {
-      showChartView();
-      canExport = true;
-      canAnalyze = true;
-      canDownloadExcel = false;
-      showAlert("Analysis Complete", r.message + (r.ack_received ? ' (ACK received)' : ' (ACK timeout)'), "success");
-      const s = JSON.parse(await window.pywebview.api.get_summary());
-      setStats(s.blown, s.avg_us, s.max_us, s.max_frame);
-    } else {
-      showAlert("Stop Error", r.message, "error");
+    function _drawPeakFrameDashboardCard() {
+      const canvas = document.getElementById('chartPeakFrame');
+      const state = _prepareDashboardCanvas(canvas);
+      if (!state) return;
+
+      const { ctx, W, H, isLightTheme } = state;
+      const topFrames = (metricData.top10 || []).slice(0, 5);
+      const peakFrame = Number(metricData.maxFrame || 0);
+      const peakTime = Number(metricData.maxUs || 0);
+
+      _setText('peakFrameCardValue', `Frame ${peakFrame.toLocaleString()}`);
+      _setText('peakFrameCardFoot', peakTime > 0 ? `${peakTime.toLocaleString()} µs peak` : 'Waiting for live data');
+      const badge = document.getElementById('peakFrameCardBadge');
+      if (badge) badge.textContent = peakFrame > 0 || peakTime > 0 ? `Frame ${peakFrame.toLocaleString()}` : 'Top frame';
+
+      if (!topFrames || topFrames.length === 0) {
+        _drawCanvasPlaceholder(ctx, W, H, 'No peak frame yet', 'Top-ranked frames will appear here', isLightTheme);
+        return;
+      }
+
+      const pad = { t: 16, r: 18, b: 20, l: 86 };
+      const iW = W - pad.l - pad.r;
+      const iH = H - pad.t - pad.b;
+      const rowGap = 10;
+      const rowH = Math.max(14, (iH - rowGap * (topFrames.length - 1)) / topFrames.length);
+      const maxVal = Math.max(topFrames[0].timeUs, THRESHOLD_US * 1.05);
+      const thresholdX = pad.l + (THRESHOLD_US / maxVal) * iW;
+
+      ctx.strokeStyle = isLightTheme ? '#d97706' : '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(thresholdX, pad.t);
+      ctx.lineTo(thresholdX, pad.t + iH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      topFrames.forEach((frame, index) => {
+        const y = pad.t + index * (rowH + rowGap);
+        const width = Math.max(1, (frame.timeUs / maxVal) * iW);
+        const isPeak = index === 0;
+        const barColor = isPeak
+          ? (isLightTheme ? '#f59e0b' : '#fbbf24')
+          : (isLightTheme ? '#60a5fa' : '#93c5fd');
+        const labelColor = isPeak ? (isLightTheme ? '#111827' : '#f8fafc') : (isLightTheme ? '#374151' : '#d1d5db');
+
+        ctx.fillStyle = labelColor;
+        ctx.font = isPeak ? "700 11px 'JetBrains Mono', monospace" : "600 11px 'JetBrains Mono', monospace";
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`Frame ${frame.frameIndex}`, pad.l - 10, y + rowH / 2);
+
+        const grad = ctx.createLinearGradient(pad.l, 0, pad.l + width, 0);
+        grad.addColorStop(0, barColor);
+        grad.addColorStop(1, isPeak ? (isLightTheme ? '#fcd34d' : '#fde68a') : barColor);
+        ctx.fillStyle = grad;
+        ctx.fillRect(pad.l, y, width, rowH);
+
+        ctx.strokeStyle = isPeak ? (isLightTheme ? '#b45309' : '#f59e0b') : (isLightTheme ? 'rgba(37, 99, 235, 0.35)' : 'rgba(96, 165, 250, 0.35)');
+        ctx.lineWidth = 1;
+        ctx.strokeRect(pad.l, y, width, rowH);
+
+        ctx.fillStyle = isLightTheme ? '#6b7280' : '#94a3b8';
+        ctx.font = "10px 'Inter', sans-serif";
+        ctx.textAlign = 'left';
+        ctx.fillText(`${frame.timeUs.toLocaleString()} µs`, pad.l + width + 6, y + rowH / 2 + 0.5);
+      });
     }
-    sync();
-  }
 
-  async function exportCsv() {
-    const r = JSON.parse(await window.pywebview.api.export_csv());
-    
-    if (r.status === 'ok') {
-      showAlert("Export Successful", `Saved ${Number(r.rows).toLocaleString()} rows → ${r.path}`, "success");
-    } else if (r.status === 'cancelled') {
-    } else {
-      showAlert("Export Error", r.message, "error");
+    const dashboardResizeObserver = new ResizeObserver(() => {
+      drawChart();
+      if (currentMetricShown) _refreshCurrentPanel();
+    });
+    const dashboardRoot = document.querySelector('.analysis-dashboard');
+    if (dashboardRoot) {
+      dashboardResizeObserver.observe(dashboardRoot);
     }
-  }
-
-  function onChunk(data) {
-    latestChunk = data.frame_data;
-
-    // Accumulate blown frames (delta from this chunk only)
-    if (data.new_blown_frames && data.new_blown_frames.length > 0) {
-      metricData.blownFramesList = metricData.blownFramesList.concat(data.new_blown_frames);
-    }
-    // Update per-frame averages and top-10 sent by backend
-    if (data.frame_avgs) metricData.frameAvgs = data.frame_avgs;
-    if (data.top10)       metricData.top10      = data.top10;
-
-    setStats(data.blown, data.avg_us, data.max_us, data.max_frame);
-    drawChart();
-
-    // Live-refresh whichever panel is open
-    if (currentMetricShown) _refreshCurrentPanel();
-  }
-
-  async function onError(msg) {
-    // 1. Stop all active operational flags
-    running = false; 
-    analysisRunning = false; 
-    
     // 2. Force the UI connection state to false
     connected = false;
     
@@ -3517,10 +3770,31 @@ async function refreshPorts() {
   }
 
   function openMetricModal(modalId) {
-    if (modalId === 'frameBlownModal') return toggleMetricView('frameBlown');
-    if (modalId === 'avgTimeModal') return toggleMetricView('avgTime');
-    if (modalId === 'maxTimeModal') return toggleMetricView('maxTime');
-    if (modalId === 'peakFrameModal') return toggleMetricView('peakFrame');
+    const mapping = {
+      frameBlownModal: 'frameBlown',
+      avgTimeModal: 'avgTime',
+      maxTimeModal: 'maxTime',
+      peakFrameModal: 'peakFrame'
+    };
+    const metricKey = mapping[modalId];
+    const modal = document.getElementById(modalId);
+    if (!metricKey || !modal) return;
+
+    if (currentOpenModal && currentOpenModal.id !== modalId) {
+      closeMetricModal(currentOpenModal.id);
+    }
+
+    if (currentOpenModal && currentOpenModal.id === modalId) {
+      return;
+    }
+
+    previousFocusedElement = document.activeElement;
+    currentMetricShown = metricKey;
+    currentOpenModal = modal;
+    modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
+    trapFocus(modal);
+    _refreshCurrentPanel();
   }
 
   function closeMetricModal(modalId) {
@@ -3530,6 +3804,7 @@ async function refreshPorts() {
       modal.setAttribute('aria-hidden', 'true');
       releaseFocus(modal);
       currentOpenModal = null;
+      currentMetricShown = null;
       
       if (previousFocusedElement && document.body.contains(previousFocusedElement)) {
         setTimeout(() => previousFocusedElement.focus(), 100);
@@ -3538,29 +3813,21 @@ async function refreshPorts() {
   }
 
   function toggleMetricView(metricKey) {
-    const chartView = document.getElementById('chartView');
-    const analysisDetail = document.getElementById('analysisDetail');
+    const mapping = {
+      frameBlown: 'frameBlownModal',
+      avgTime: 'avgTimeModal',
+      maxTime: 'maxTimeModal',
+      peakFrame: 'peakFrameModal'
+    };
+    const modalId = mapping[metricKey];
+    if (!modalId) return;
 
-    if (currentMetricShown === metricKey) {
-      currentMetricShown = null;
-      ['frameBlown','avgTime','maxTime','peakFrame'].forEach(k => {
-        const el = document.getElementById('inline_' + k);
-        if (el) el.style.display = 'none';
-      });
-      analysisDetail.style.display = 'none';
-      chartView.style.display = 'block';
+    if (currentMetricShown === metricKey && currentOpenModal && currentOpenModal.id === modalId) {
+      closeMetricModal(modalId);
       return;
     }
 
-    currentMetricShown = metricKey;
-    chartView.style.display = 'none';
-    analysisDetail.style.display = 'flex';
-    ['frameBlown','avgTime','maxTime','peakFrame'].forEach(k => {
-      const el = document.getElementById('inline_' + k);
-      if (el) el.style.display = (k === metricKey) ? 'flex' : 'none';
-    });
-
-    _refreshCurrentPanel();
+    openMetricModal(modalId);
   }
 
   // ── Internal helpers ─────────────────────────────────────────
