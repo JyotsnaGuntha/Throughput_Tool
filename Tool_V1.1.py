@@ -1362,6 +1362,7 @@ body.light-theme input[type=text]:focus {
   display: flex; 
   flex-direction: column; 
   overflow: hidden; 
+  position: relative;
 }
 
 .analysis-dashboard {
@@ -1522,6 +1523,93 @@ body.light-theme .analysis-card-chart {
   line-height: 1.1;
   color: var(--text-primary);
   white-space: nowrap;
+}
+
+.start-analysis-prompt {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--bg-main) 0%, rgba(42, 50, 63, 0.8) 100%);
+  z-index: 100;
+  flex-direction: column;
+  gap: 28px;
+  padding: 40px;
+  text-align: center;
+}
+
+.start-analysis-prompt.show {
+  display: flex;
+}
+
+body.light-theme .start-analysis-prompt {
+  background: #ffffff;
+}
+
+.start-analysis-prompt-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%);
+  border: 2px solid rgba(59, 130, 246, 0.3);
+}
+
+.start-analysis-prompt-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  margin: 0;
+}
+
+body.light-theme .start-analysis-prompt-title {
+  color: #111827;
+}
+
+.start-analysis-prompt-subtitle {
+  font-size: 16px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 480px;
+  margin: 0;
+  letter-spacing: 0.3px;
+}
+
+body.light-theme .start-analysis-prompt-subtitle {
+  color: #4b5563;
+}
+
+.start-analysis-prompt-button {
+  padding: 16px 48px;
+  height: auto;
+  min-height: 48px;
+  font-size: 16px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.start-analysis-prompt-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(16, 185, 129, 0.4);
+}
+
+.start-analysis-prompt-button:active {
+  transform: scale(0.98);
 }
 
 @media (max-width: 1100px) {
@@ -2704,6 +2792,17 @@ body.light-theme #analysisDetail .metric-detail-section {
         <div class="analysis-card-chart"><canvas id="chartPeakFrame"></canvas></div>
       </section>
     </div>
+
+    <!-- Start Analysis Prompt (shown when connected but not running) -->
+    <div class="start-analysis-prompt" id="startAnalysisPrompt">
+      <div class="start-analysis-prompt-icon">▶</div>
+      <h2 class="start-analysis-prompt-title">Ready to Analyze</h2>
+      <p class="start-analysis-prompt-subtitle">Device connected and waiting for data. Click the button below to begin collecting and analyzing frame throughput data in real-time.</p>
+      <button class="start-analysis-prompt-button" onclick="window._app && window._app.startAnalysis()">
+        <span>▶</span>
+        <span>Start Analysis</span>
+      </button>
+    </div>
   </div>
 
   <!-- Right Control Panel -->
@@ -3216,6 +3315,16 @@ const app = (() => {
     // Control ML flow buttons
     document.getElementById('btnAnalyze').disabled = !canAnalyze || analysisRunning;
     document.getElementById('btnDownloadExcel').disabled = !canDownloadExcel;
+
+    // Show "Start Analysis" prompt when connected but not running
+    const promptElement = document.getElementById('startAnalysisPrompt');
+    if (promptElement) {
+      if (connected && !running) {
+        promptElement.classList.add('show');
+      } else {
+        promptElement.classList.remove('show');
+      }
+    }
   }
 
   function showChartView() {

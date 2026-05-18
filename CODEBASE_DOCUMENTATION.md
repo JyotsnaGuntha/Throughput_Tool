@@ -1503,3 +1503,9 @@ The architecture is modular, maintainable, and extensible for future enhancement
 **Last Updated**: May 16, 2026  
 **Author**: Development Team  
 **Status**: Complete
+
+## Conclusion
+
+The project is progressively evolving into a scalable real-time analysis and engineering automation platform focused on improving system performance monitoring, design consistency, and workflow efficiency.
+
+Additionally, thread decoupling was implemented to overcome single-thread bottlenecks by moving serial port monitoring (`_receive_loop`) to a background thread, ensuring smooth real-time UI rendering and uninterrupted high-speed data acquisition.
