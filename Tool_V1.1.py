@@ -15,7 +15,6 @@
 
 import csv
 import json
-import logging
 import os
 import shutil
 import subprocess
@@ -25,11 +24,6 @@ import sys
 import tempfile
 from datetime import datetime
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import pandas as pd
-import seaborn as sns
 import serial
 import serial.tools.list_ports
 import webview
@@ -39,87 +33,6 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-
-logger = logging.getLogger(__name__)
-
-
-class VisualizationEngine:
-  def __init__(self):
-    sns.set(style="whitegrid")
-
-  def generate_all(self, analyzed_df: pd.DataFrame, out_dir: str):
-    os.makedirs(out_dir, exist_ok=True)
-    try:
-      self.anomaly_heatmap(analyzed_df, out_dir)
-      self.frame_spike_graphs(analyzed_df, out_dir)
-      self.rolling_average_plots(analyzed_df, out_dir)
-      self.latency_distribution(analyzed_df, out_dir)
-    except Exception as exc:
-      logger.exception("Error generating visuals: %s", exc)
-
-  def anomaly_heatmap(self, df: pd.DataFrame, out_dir: str):
-    frame_cols = [c for c in df.columns if c.startswith("Frame_")]
-    if not frame_cols:
-      return
-
-    data = df[frame_cols].copy()
-    plt.figure(figsize=(12, 6))
-    sns.heatmap(data.T, cmap="coolwarm", cbar=True)
-    path = os.path.join(out_dir, "anomaly_heatmap.png")
-    plt.title("Frame Values Heatmap")
-    plt.tight_layout()
-    plt.savefig(path)
-    plt.close()
-    logger.info("Saved heatmap to %s", path)
-
-  def frame_spike_graphs(self, df: pd.DataFrame, out_dir: str, top_n=6):
-    frame_cols = [c for c in df.columns if c.startswith("Frame_")]
-    if not frame_cols:
-      return
-
-    ranks = df[frame_cols].std().sort_values(ascending=False).head(top_n).index.tolist()
-    for col in ranks:
-      plt.figure(figsize=(10, 3))
-      plt.plot(df["Time_Second"], df[col], label=col)
-      plt.title(f"Frame spike - {col}")
-      plt.xlabel("Time_Second")
-      plt.ylabel("us")
-      plt.tight_layout()
-      path = os.path.join(out_dir, f"{col}_spike.png")
-      plt.savefig(path)
-      plt.close()
-      logger.info("Saved spike graph to %s", path)
-
-  def rolling_average_plots(self, df: pd.DataFrame, out_dir: str):
-    frame_cols = [c for c in df.columns if c.startswith("Frame_")]
-    if not frame_cols:
-      return
-
-    mean_col = df[frame_cols].mean(axis=1)
-    plt.figure(figsize=(10, 3))
-    plt.plot(df["Time_Second"], mean_col, label="Rolling Mean")
-    plt.title("Rolling Mean across frames")
-    plt.xlabel("Time_Second")
-    plt.tight_layout()
-    path = os.path.join(out_dir, "rolling_mean.png")
-    plt.savefig(path)
-    plt.close()
-    logger.info("Saved rolling mean to %s", path)
-
-  def latency_distribution(self, df: pd.DataFrame, out_dir: str):
-    frame_cols = [c for c in df.columns if c.startswith("Frame_")]
-    if not frame_cols:
-      return
-
-    data = df[frame_cols].stack().reset_index(drop=True)
-    plt.figure(figsize=(8, 4))
-    sns.histplot(data, bins=50)
-    plt.title("Latency Distribution")
-    plt.tight_layout()
-    path = os.path.join(out_dir, "latency_distribution.png")
-    plt.savefig(path)
-    plt.close()
-    logger.info("Saved latency distribution to %s", path)
 
 # ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 #  Protocol constants
@@ -161,8 +74,6 @@ class Api:
 
         self._last_exported_csv_path: str | None = None
         self._analysis_excel_path: str | None = None
-        self._analysis_pdf_path: str | None = None
-        self._analysis_anomaly_csv_path: str | None = None
         self._analysis_temp_dir: str | None = None
 
     def _reset_session_state(self) -> None:
@@ -179,8 +90,6 @@ class Api:
             self._frame_counts = [0] * CHUNK_SIZE
             self._top10_frames = []
         self._analysis_excel_path = None
-        self._analysis_pdf_path = None
-        self._analysis_anomaly_csv_path = None
         self._analysis_temp_dir = None
         self._last_exported_csv_path = None
 
@@ -236,15 +145,6 @@ class Api:
         self._write_snapshot_csv(csv_path)
         return csv_path
 
-    def _parse_subprocess_json(self, stdout: str) -> dict:
-        lines = [line.strip() for line in stdout.splitlines() if line.strip()]
-        for line in reversed(lines):
-            try:
-                return json.loads(line)
-            except Exception:
-                continue
-        raise ValueError("Analysis completed but returned invalid JSON output.")
-
     def _run_analysis_worker(self) -> None:
         try:
             input_csv = self._prepare_analysis_input()
@@ -266,34 +166,23 @@ class Api:
                 return
 
             try:
-              result = self._parse_subprocess_json(completed.stdout)
-            except Exception as exc:
-              window.evaluate_js(
-                f"window._app && window._app.onAnalysisError({json.dumps(str(exc))})"
-              )
-              return
+                result = json.loads(completed.stdout.strip() or "{}")
+            except json.JSONDecodeError:
+                window.evaluate_js(
+                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but the model returned an invalid response.')})"
+                )
+                return
 
-            excel_path = result.get("excel_path") or result.get("output_path")
-            pdf_path = result.get("pdf_path")
-            anomaly_csv_path = result.get("anomaly_csv_path")
-
-            if not excel_path or not os.path.exists(excel_path):
+            output_path = result.get("output_path")
+            if not output_path or not os.path.exists(output_path):
                 window.evaluate_js(
                     f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no Excel report was generated.')})"
                 )
                 return
 
-            if not pdf_path or not os.path.exists(pdf_path):
-              window.evaluate_js(
-                f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no PDF report was generated.')})"
-              )
-              return
-
-            self._analysis_excel_path = excel_path
-            self._analysis_pdf_path = pdf_path
-            self._analysis_anomaly_csv_path = anomaly_csv_path if anomaly_csv_path and os.path.exists(anomaly_csv_path) else None
+            self._analysis_excel_path = output_path
             window.evaluate_js(
-              f"window._app && window._app.onAnalysisComplete({json.dumps({'message': 'Patterns analyzed successfully. Export Analysis will save both Excel and PDF reports.'})})"
+                f"window._app && window._app.onAnalysisComplete({json.dumps({'message': 'Patterns Analyzed Successfully'})})"
             )
         except Exception as exc:
             window.evaluate_js(
@@ -316,48 +205,27 @@ class Api:
         worker.start()
         return json.dumps({"status": "ok", "message": "Analysis started."})
 
-    def export_analysis(self) -> str:
-      if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
-        return json.dumps({"status": "error", "message": "No analyzed Excel report is available. Run Analyze first."})
-
-      if not self._analysis_pdf_path or not os.path.exists(self._analysis_pdf_path):
-        return json.dumps({"status": "error", "message": "No analysis PDF report is available. Run Analyze first."})
-
-      try:
-        result = window.create_file_dialog(
-          webview.FileDialog.FOLDER,
-          directory=os.path.expanduser("~")
-        )
-
-        if not result:
-          return json.dumps({"status": "cancelled", "message": "Export cancelled."})
-
-        export_dir = result if isinstance(result, str) else result[0]
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        excel_dest = os.path.join(export_dir, f"throughput_{ts}_ML_Analyzed.xlsx")
-        pdf_dest = os.path.join(export_dir, f"throughput_{ts}_Analysis_Report.pdf")
-
-        shutil.copyfile(self._analysis_excel_path, excel_dest)
-        shutil.copyfile(self._analysis_pdf_path, pdf_dest)
-
-        anomaly_dest = None
-        if self._analysis_anomaly_csv_path and os.path.exists(self._analysis_anomaly_csv_path):
-          anomaly_dest = os.path.join(export_dir, f"throughput_{ts}_Anomalies.csv")
-          shutil.copyfile(self._analysis_anomaly_csv_path, anomaly_dest)
-
-        return json.dumps({
-          "status": "ok",
-          "excel_path": excel_dest,
-          "pdf_path": pdf_dest,
-          "anomaly_csv_path": anomaly_dest,
-        })
-      except Exception as exc:
-        return json.dumps({"status": "error", "message": str(exc)})
-
     def download_excel(self) -> str:
-      # Backward-compatible API alias for older frontend hooks.
-      return self.export_analysis()
+        if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
+            return json.dumps({"status": "error", "message": "No analyzed Excel report is available."})
+
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"throughput_{ts}_ML_Analyzed.xlsx"
+            result = window.create_file_dialog(
+                webview.FileDialog.SAVE,
+                save_filename=default_name,
+                file_types=["Excel Files (*.xlsx)", "All files (*.*)"]
+            )
+
+            if not result:
+                return json.dumps({"status": "cancelled", "message": "Download cancelled."})
+
+            filepath = result if isinstance(result, str) else result[0]
+            shutil.copyfile(self._analysis_excel_path, filepath)
+            return json.dumps({"status": "ok", "path": filepath})
+        except Exception as exc:
+            return json.dumps({"status": "error", "message": str(exc)})
         
     def download_pdf(self) -> str:
         if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
@@ -946,14 +814,14 @@ body.light-theme .topbar {
   justify-content: center;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+  transition: all 0.3s ease;
   position: relative;
 }
 .theme-toggle:hover {
   background: rgba(255, 255, 255, 0.15);
   border-color: var(--blue);
   color: var(--blue-light);
-  transform: translateY(-1px);
+  transform: scale(1.05);
 }
 .theme-toggle:active {
   transform: scale(0.98);
@@ -973,7 +841,7 @@ body.light-theme .theme-toggle:hover {
 .theme-icon {
   width: 18px;
   height: 18px;
-  transition: transform 0.25s ease, opacity 0.25s ease;
+  transition: all 0.3s ease;
 }
 
 .theme-toggle:hover .theme-icon:not([style*="display: none"]) {
@@ -1362,271 +1230,6 @@ body.light-theme input[type=text]:focus {
   display: flex; 
   flex-direction: column; 
   overflow: hidden; 
-  position: relative;
-}
-
-.analysis-dashboard {
-  flex: 1;
-  min-height: 0;
-  padding: 16px 18px 12px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  background: linear-gradient(135deg, var(--bg-main) 0%, rgba(42, 50, 63, 0.8) 100%);
-  overflow: hidden;
-}
-
-body.light-theme .analysis-dashboard {
-  background: #ffffff;
-}
-
-.analysis-card {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  background: linear-gradient(135deg, var(--surface) 0%, rgba(42, 50, 63, 0.6) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  overflow: hidden;
-  position: relative;
-  cursor: pointer;
-  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
-}
-
-.analysis-card::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto auto 0;
-  width: 100%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
-  pointer-events: none;
-}
-
-.analysis-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
-}
-
-.analysis-card.blown {
-  border-top: 2px solid rgba(239, 68, 68, 0.85);
-}
-
-.analysis-card.avg {
-  border-top: 2px solid rgba(16, 185, 129, 0.85);
-}
-
-.analysis-card.peak-time {
-  border-top: 2px solid rgba(245, 158, 11, 0.9);
-}
-
-.analysis-card.peak-frame {
-  border-top: 2px solid rgba(59, 130, 246, 0.9);
-}
-
-body.light-theme .analysis-card {
-  background: #f9fafb;
-  border-color: #e5e7eb;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-
-body.light-theme .analysis-card::before {
-  background: transparent;
-}
-
-body.light-theme .analysis-card:hover {
-  border-color: #bfdbfe;
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.12);
-}
-
-.analysis-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.analysis-card-title {
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  color: var(--text-primary);
-}
-
-.analysis-card-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  flex-shrink: 0;
-}
-
-.analysis-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  flex-shrink: 0;
-}
-
-.analysis-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-}
-
-.analysis-legend-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-
-.analysis-legend-swatch.line {
-  width: 14px;
-  height: 2px;
-  border-radius: 999px;
-}
-
-.analysis-card-chart {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.10) 100%);
-  overflow: hidden;
-}
-
-body.light-theme .analysis-card-chart {
-  background: #ffffff;
-  border-color: #e5e7eb;
-}
-
-.analysis-card-chart canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.analysis-card-value {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.start-analysis-prompt {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--bg-main) 0%, rgba(42, 50, 63, 0.8) 100%);
-  z-index: 100;
-  flex-direction: column;
-  gap: 28px;
-  padding: 40px;
-  text-align: center;
-}
-
-.start-analysis-prompt.show {
-  display: flex;
-}
-
-body.light-theme .start-analysis-prompt {
-  background: #ffffff;
-}
-
-.start-analysis-prompt-icon {
-  width: 80px;
-  height: 80px;
-  border-radius: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 40px;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%);
-  border: 2px solid rgba(59, 130, 246, 0.3);
-}
-
-.start-analysis-prompt-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: -0.5px;
-  margin: 0;
-}
-
-body.light-theme .start-analysis-prompt-title {
-  color: #111827;
-}
-
-.start-analysis-prompt-subtitle {
-  font-size: 16px;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  max-width: 480px;
-  margin: 0;
-  letter-spacing: 0.3px;
-}
-
-body.light-theme .start-analysis-prompt-subtitle {
-  color: #4b5563;
-}
-
-.start-analysis-prompt-button {
-  padding: 16px 48px;
-  height: auto;
-  min-height: 48px;
-  font-size: 16px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
-  border: none;
-  cursor: pointer;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.start-analysis-prompt-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 32px rgba(16, 185, 129, 0.4);
-}
-
-.start-analysis-prompt-button:active {
-  transform: scale(0.98);
-}
-
-@media (max-width: 1100px) {
-  .analysis-dashboard {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 720px) {
-  .analysis-dashboard {
-    padding: 12px;
-    gap: 12px;
-  }
-
-  .analysis-card {
-    padding: 14px;
-  }
 }
 
 .stats {
@@ -2702,20 +2305,20 @@ body.light-theme #analysisDetail .metric-detail-section {
       <span class="top-status-dot" id="usbStatusDot"></span>
       <span id="usbStatusText">Disconnected</span>
     </div>
-    <button class="theme-toggle" id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme" onclick="window._app && window._app.toggleTheme()">
-      <svg class="theme-icon" id="sunIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-        <circle cx="12" cy="12" r="4"></circle>
-        <path d="M12 2v2"></path>
-        <path d="M12 20v2"></path>
-        <path d="m4.93 4.93 1.41 1.41"></path>
-        <path d="m17.66 17.66 1.41 1.41"></path>
-        <path d="M2 12h2"></path>
-        <path d="M20 12h2"></path>
-        <path d="m6.34 17.66-1.41 1.41"></path>
-        <path d="m19.07 4.93-1.41 1.41"></path>
+    <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme">
+      <svg class="theme-icon" id="sunIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
       </svg>
-      <svg class="theme-icon" id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;" aria-hidden="true" focusable="false">
-        <path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"></path>
+      <svg class="theme-icon" id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
       </svg>
     </button>
   </div>
@@ -2724,84 +2327,270 @@ body.light-theme #analysisDetail .metric-detail-section {
 <div class="layout">
 
   <div class="main">
-    <div class="analysis-dashboard">
-      <section class="analysis-card blown clickable" id="cardFrameBlown" onclick="window._app && window._app.toggleMetricView('frameBlown')">
-        <div class="analysis-card-header">
-          <div>
-            <div class="analysis-card-title">Frames Blown</div>
-          </div>
-          <div class="analysis-card-meta">
-            <div class="analysis-card-value" id="blownCardValue">-</div>
-          </div>
-        </div>
-        <div class="analysis-legend">
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: linear-gradient(135deg, var(--blue) 0%, var(--blue-light) 100%);"></span>Normal (&le; 2000µs)</div>
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: linear-gradient(135deg, var(--red) 0%, var(--red-light) 100%);"></span>Blown (&gt; 2000µs)</div>
-        </div>
-        <div class="analysis-card-chart"><canvas id="chartBlown"></canvas></div>
-      </section>
-
-      <section class="analysis-card avg clickable" id="cardAvgTime" onclick="window._app && window._app.toggleMetricView('avgTime')">
-        <div class="analysis-card-header">
-          <div>
-            <div class="analysis-card-title">Average Time</div>
-          </div>
-          <div class="analysis-card-meta">
-            <div class="analysis-card-value c-green" id="avgCardValue">-</div>
-          </div>
-        </div>
-        <div class="analysis-legend">
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch line" style="background: var(--blue-light);"></span>Average trend</div>
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch line" style="background: var(--amber);"></span>2000µs threshold</div>
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--red-light);"></span>Above threshold</div>
-        </div>
-        <div class="analysis-card-chart"><canvas id="chartAvg"></canvas></div>
-      </section>
-
-      <section class="analysis-card peak-time clickable" id="cardMaxTime" onclick="window._app && window._app.toggleMetricView('maxTime')">
-        <div class="analysis-card-header">
-          <div>
-            <div class="analysis-card-title">Peak Time</div>
-          </div>
-          <div class="analysis-card-meta">
-            <div class="analysis-card-value c-amber" id="peakTimeCardValue">-</div>
-          </div>
-        </div>
-        <div class="analysis-legend">
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--green-light);"></span>Safe zone</div>
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--amber);"></span>Warning zone</div>
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--red-light);"></span>Critical zone</div>
-        </div>
-        <div class="analysis-card-chart"><canvas id="chartPeakTime"></canvas></div>
-      </section>
-
-      <section class="analysis-card peak-frame clickable" id="cardPeakFrame" onclick="window._app && window._app.toggleMetricView('peakFrame')">
-        <div class="analysis-card-header">
-          <div>
-            <div class="analysis-card-title">Peak Frame</div>
-          </div>
-          <div class="analysis-card-meta">
-            <div class="analysis-card-value c-blue" id="peakFrameCardValue">-</div>
-          </div>
-        </div>
-        <div class="analysis-legend">
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--amber);"></span>Peak frame</div>
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch" style="background: var(--blue-light);"></span>Other top frames</div>
-          <div class="analysis-legend-item"><span class="analysis-legend-swatch line" style="background: var(--red-light);"></span>2000µs threshold</div>
-        </div>
-        <div class="analysis-card-chart"><canvas id="chartPeakFrame"></canvas></div>
-      </section>
+    <div class="stats">
+      <div class="scard clickable" id="cardFrameBlown" onclick="app.toggleMetricView('frameBlown')">
+        <div class="scard-lbl">Frames Blown</div>
+        <div class="scard-val c-red" id="svBlown">—</div>
+      </div>
+      <div class="scard clickable" id="cardAvgTime" onclick="app.toggleMetricView('avgTime')">
+        <div class="scard-lbl">Average Time</div>
+        <div class="scard-val c-green" id="svAvg">—</div>
+        <div class="scard-unit">microseconds</div>
+      </div>
+      <div class="scard clickable" id="cardMaxTime" onclick="app.toggleMetricView('maxTime')">
+        <div class="scard-lbl">Maximum Time</div>
+        <div class="scard-val c-amber" id="svMaxTime">—</div>
+        <div class="scard-unit">microseconds</div>
+      </div>
+      <div class="scard clickable" id="cardPeakFrame" onclick="app.toggleMetricView('peakFrame')">
+        <div class="scard-lbl">Peak Frame</div>
+        <div class="scard-val c-blue" id="svMaxFrame">—</div>
+      </div>
     </div>
 
-    <!-- Start Analysis Prompt (shown when connected but not running) -->
-    <div class="start-analysis-prompt" id="startAnalysisPrompt">
-      <div class="start-analysis-prompt-icon">▶</div>
-      <h2 class="start-analysis-prompt-title">Ready to Analyze</h2>
-      <p class="start-analysis-prompt-subtitle">Device connected and waiting for data. Click the button below to begin collecting and analyzing frame throughput data in real-time.</p>
-      <button class="start-analysis-prompt-button" onclick="window._app && window._app.startAnalysis()">
-        <span>▶</span>
-        <span>Start Analysis</span>
-      </button>
+    <!-- Chart area -->
+    <div class="chart-area">
+      <div class="chart-hdr">
+        <span class="chart-ttl">Analysis Data View</span>
+        <div class="legend">
+          <div class="leg-item"><div class="leg-sq ok"></div>Normal (&le;2000µs)</div>
+          <div class="leg-item"><div class="leg-sq blown"></div>Blown (&gt;2000µs)</div>
+          <div class="leg-item"><div class="leg-ln"></div>2000µs threshold</div>
+        </div>
+      </div>
+      <div id="chartView" class="chart-box"><canvas id="chart"></canvas></div>
+      <div id="analysisDetail" style="display: none;">
+
+        <!-- ══ 1. FRAMES BLOWN DASHBOARD ══════════════════════════════ -->
+        <div class="metric-modal-card" id="inline_frameBlown" style="display:none;">
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">⚠️</div>
+            <div style="flex:1;">
+              <div class="metric-modal-title" id="inline_blownModalTitle">Frames Blown</div>
+              <div class="metric-modal-subtitle">Real-time Threshold Exceedance Monitor</div>
+            </div>
+          </div>
+
+          <!-- KPI strip -->
+          <div class="dash-hero-grid">
+            <div class="dash-kpi c-red">
+              <div class="dash-kpi-lbl">Total Blown</div>
+              <div class="dash-kpi-val c-red" id="ib_totalBlown">—</div>
+              <div class="dash-kpi-sub">frames > 2000 µs</div>
+            </div>
+            <div class="dash-kpi c-amber">
+              <div class="dash-kpi-lbl">% of Frames</div>
+              <div class="dash-kpi-val c-amber" id="ib_blownPct">—</div>
+              <div class="dash-kpi-sub">exceedance rate</div>
+            </div>
+            <div class="dash-kpi c-purple">
+              <div class="dash-kpi-lbl">Last Blown</div>
+              <div class="dash-kpi-val c-purple" id="ib_lastBlownSec">—</div>
+              <div class="dash-kpi-sub">second of session</div>
+            </div>
+          </div>
+
+          <!-- Live table -->
+          <div class="dash-section">
+            <div class="dash-section-title">
+              <span class="live-dot"></span>
+              All Blown Frames — <span id="ib_blownCount">0</span> total
+              <span style="margin-left:auto; display:flex; gap:6px;">
+                <button onclick="app.sortBlownInline('frameIndex')" id="ib_sortFrameBtn"
+                  style="background:rgba(59,130,246,0.1);border:1px solid var(--border);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--text-secondary);cursor:pointer;">Frame #</button>
+                <button onclick="app.sortBlownInline('second')" id="ib_sortSecBtn"
+                  style="background:rgba(59,130,246,0.1);border:1px solid var(--border);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--text-secondary);cursor:pointer;">Second</button>
+                <button onclick="app.sortBlownInline('timeUs')" id="ib_sortTimeBtn"
+                  style="background:rgba(59,130,246,0.15);border:1px solid var(--blue);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--blue-light);cursor:pointer;">Time ▼</button>
+              </span>
+            </div>
+            <table class="dash-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Second</th>
+                  <th>Time (µs)</th>
+                  <th>Severity</th>
+                </tr>
+              </thead>
+              <tbody id="ib_blownBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ══ 2. AVERAGE TIME DASHBOARD ═══════════════════════════════ -->
+        <div class="metric-modal-card" id="inline_avgTime" style="display:none;">
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">📊</div>
+            <div style="flex:1;">
+              <div class="metric-modal-title">Average Time</div>
+              <div class="metric-modal-subtitle">Mean Processing Latency — Live per-Frame Analysis</div>
+            </div>
+          </div>
+
+          <!-- KPI strip -->
+          <div class="dash-hero-grid">
+            <div class="dash-kpi c-green">
+              <div class="dash-kpi-lbl">Overall Average</div>
+              <div class="dash-kpi-val c-green" id="ib_avgOverall">—</div>
+              <div class="dash-kpi-sub">µs across all frames</div>
+            </div>
+            <div class="dash-kpi c-blue">
+              <div class="dash-kpi-lbl">Frame Count</div>
+              <div class="dash-kpi-val c-blue" id="ib_avgFrameCount">—</div>
+              <div class="dash-kpi-sub">total samples seen</div>
+            </div>
+            <div class="dash-kpi c-purple">
+              <div class="dash-kpi-lbl">Status</div>
+              <div id="ib_avgBadge" class="dash-badge excellent" style="margin-top:6px;">Excellent</div>
+            </div>
+          </div>
+
+          <!-- Per-frame sparkline -->
+          <div class="dash-section">
+            <div class="dash-section-title">
+              <span class="live-dot"></span>
+              Per-Frame Average (0 → 499)
+            </div>
+            <div class="avg-canvas-wrap">
+              <canvas class="avg-canvas" id="ib_avgCanvas"></canvas>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:4px;">
+              <span style="font-size:9px;color:var(--text-muted);">Frame 0</span>
+              <span style="font-size:9px;color:var(--text-muted);text-align:center;">--- 2000 µs threshold ---</span>
+              <span style="font-size:9px;color:var(--text-muted);">Frame 499</span>
+            </div>
+          </div>
+
+          <!-- Top 10 highest average frames -->
+          <div class="dash-section">
+            <div class="dash-section-title">Top 10 Highest-Average Frames</div>
+            <table class="dash-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Avg Time (µs)</th>
+                  <th>vs Overall</th>
+                  <th>Bar</th>
+                </tr>
+              </thead>
+              <tbody id="ib_avgTopBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ══ 3. MAX TIME DASHBOARD ════════════════════════════════════ -->
+        <div class="metric-modal-card" id="inline_maxTime" style="display:none;">
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">⏱️</div>
+            <div style="flex:1;">
+              <div class="metric-modal-title">Maximum Time</div>
+              <div class="metric-modal-subtitle">Peak Latency Tracker — Top 10 All-Time Highs</div>
+            </div>
+          </div>
+
+          <!-- KPI strip -->
+          <div class="dash-hero-grid">
+            <div class="dash-kpi c-amber">
+              <div class="dash-kpi-lbl">Session Max</div>
+              <div class="dash-kpi-val c-amber" id="ib_maxValue">—</div>
+              <div class="dash-kpi-sub">µs — all-time peak</div>
+            </div>
+            <div class="dash-kpi c-red">
+              <div class="dash-kpi-lbl">Over Threshold</div>
+              <div class="dash-kpi-val c-red" id="ib_maxExceed">—</div>
+              <div class="dash-kpi-sub">µs above 2000</div>
+            </div>
+            <div class="dash-kpi c-blue">
+              <div class="dash-kpi-lbl">Reached at Second</div>
+              <div class="dash-kpi-val c-blue" id="ib_maxSecond">—</div>
+              <div class="dash-kpi-sub">session timestamp</div>
+            </div>
+          </div>
+
+          <!-- Top 10 table -->
+          <div class="dash-section">
+            <div class="dash-section-title">
+              <span class="live-dot"></span>
+              Top 10 Highest Processing Times
+            </div>
+            <table class="dash-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Second</th>
+                  <th>Time (µs)</th>
+                  <th>Severity Bar</th>
+                </tr>
+              </thead>
+              <tbody id="ib_maxBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ══ 4. PEAK FRAME DASHBOARD ══════════════════════════════════ -->
+        <div class="metric-modal-card" id="inline_peakFrame" style="display:none;">
+          <div class="metric-modal-header">
+            <div class="metric-modal-icon">🎯</div>
+            <div style="flex:1;">
+              <div class="metric-modal-title">Peak Frame</div>
+              <div class="metric-modal-subtitle">Top 10 Frames by Maximum Processing Time</div>
+            </div>
+          </div>
+
+          <!-- Hero frame card -->
+          <div class="dash-hero-frame">
+            <div class="dash-hero-frame-icon">🏆</div>
+            <div>
+              <div class="dash-hero-frame-num" id="ib_peakHeroNum">Frame —</div>
+              <div class="dash-hero-frame-label" id="ib_peakHeroTime">— µs — absolute session peak</div>
+            </div>
+            <div style="margin-left:auto;" id="ib_peakHeroBadge"></div>
+          </div>
+
+          <!-- KPI strip -->
+          <div class="dash-hero-grid">
+            <div class="dash-kpi c-blue">
+              <div class="dash-kpi-lbl">Peak Frame #</div>
+              <div class="dash-kpi-val c-blue" id="ib_peakFrameNum">—</div>
+              <div class="dash-kpi-sub">index 0–499</div>
+            </div>
+            <div class="dash-kpi c-amber">
+              <div class="dash-kpi-lbl">Peak Time</div>
+              <div class="dash-kpi-val c-amber" id="ib_peakFrameTime">—</div>
+              <div class="dash-kpi-sub">µs maximum</div>
+            </div>
+            <div class="dash-kpi c-red">
+              <div class="dash-kpi-lbl">Threshold Status</div>
+              <div id="ib_peakStatus" class="dash-badge critical" style="margin-top:6px;">⚠️ Blown</div>
+            </div>
+          </div>
+
+          <!-- Top 10 peak frames table -->
+          <div class="dash-section">
+            <div class="dash-section-title">
+              <span class="live-dot"></span>
+              Top 10 Peak Frames
+            </div>
+            <table class="dash-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Frame #</th>
+                  <th>Second</th>
+                  <th>Time (µs)</th>
+                  <th>Threshold</th>
+                </tr>
+              </thead>
+              <tbody id="ib_peakBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
     </div>
   </div>
 
@@ -2816,7 +2605,7 @@ body.light-theme #analysisDetail .metric-detail-section {
         <span class="conn-field-label">COM Port</span>
         <div class="ctrl-row full">
           <select id="portSel"><option value="">No ports found</option></select>
-          <button class="btn-icon" id="btnRefresh" title="Refresh ports" onclick="window._app && window._app.refreshPorts()">
+          <button class="btn-icon" id="btnRefresh" title="Refresh ports" onclick="app.refreshPorts()">
             <svg id="refreshIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M1 8a7 7 0 1 0 2-4.9"/>
               <polyline points="1,3 1,8 6,8"/>
@@ -2836,7 +2625,7 @@ body.light-theme #analysisDetail .metric-detail-section {
       </div>
 
       <!-- Full-width Connect / Disconnect button -->
-      <button class="btn-connect" id="btnConn" onclick="window._app && window._app.toggleConnect()">Connect</button>
+      <button class="btn-connect" id="btnConn" onclick="app.toggleConnect()">Connect</button>
     </div>
 
     <!-- Analysis Section -->
@@ -2844,24 +2633,24 @@ body.light-theme #analysisDetail .metric-detail-section {
       <span class="ctrl-section-title">Analysis</span>
       
       <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-        <button class="btn-action start" id="btnStart" onclick="window._app && window._app.startAnalysis()" title="Start Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
+        <button class="btn-action start" id="btnStart" onclick="app.startAnalysis()" title="Start Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><polygon points="4,2 14,8 4,14"/></svg>
           Start
         </button>
         
-        <button class="btn-action stop" id="btnStop" onclick="window._app && window._app.stopAnalysis()" title="Stop Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
+        <button class="btn-action stop" id="btnStop" onclick="app.stopAnalysis()" title="Stop Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>
           Stop
         </button>
         
         <div class="hr" style="margin: 4px 0; flex: none;"></div>
         
-        <button class="btn-action analyze" id="btnAnalyze" onclick="window._app && window._app.analyze()" title="Run ML Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
+        <button class="btn-action analyze" id="btnAnalyze" onclick="app.analyze()" title="Run ML Analysis" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h10v2H3zm0 4h10v2H3zm0 4h7v2H3z"/></svg>
           Analyze
         </button>
         
-        <button class="btn-action download" id="btnDownloadExcel" onclick="window._app && window._app.exportAnalysis()" title="Export Analysis Report" style="flex: none; height: 40px; font-size: 13px;" disabled>
+        <button class="btn-action download" id="btnDownloadExcel" onclick="app.downloadExcel()" title="Export Analysis Report" style="flex: none; height: 40px; font-size: 13px;" disabled>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 2v9M4 7l4 4 4-4"/><line x1="2" y1="14" x2="14" y2="14"/>
           </svg>
@@ -2881,7 +2670,7 @@ body.light-theme #analysisDetail .metric-detail-section {
             <div class="alert-title" id="alertTitle">Error</div>
         </div>
         <div class="alert-body" id="alertBody"></div>
-        <button class="alert-ok error" id="alertOk" onclick="window._app && window._app.closeAlert()">OK</button>
+        <button class="alert-ok error" id="alertOk" onclick="app.closeAlert()">OK</button>
     </div>
 </div>
 
@@ -2895,7 +2684,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 <!-- Metric Detail Modals -->
 <div class="modal-backdrop" id="frameBlownModal" role="presentation">
   <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="blownModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="window._app && window._app.closeMetricModal('frameBlownModal')" aria-label="Close Frames Blown details">×</button>
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('frameBlownModal')" aria-label="Close Frames Blown details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">⚠️</div>
       <div>
@@ -2913,9 +2702,9 @@ body.light-theme #analysisDetail .metric-detail-section {
       <table class="metric-table">
         <thead>
           <tr>
-            <th class="sort-header" id="blownSortRankHeader" onclick="window._app && window._app.sortBlownFrames('rank')">Rank</th>
-            <th class="sort-header" id="blownSortFrameHeader" onclick="window._app && window._app.sortBlownFrames('frameIndex')">Frame #</th>
-            <th class="sort-header" id="blownSortTimeHeader" onclick="window._app && window._app.sortBlownFrames('timeUs')">Time (µs)</th>
+            <th class="sort-header" id="blownSortRankHeader" onclick="app.sortBlownFrames('rank')">Rank</th>
+            <th class="sort-header" id="blownSortFrameHeader" onclick="app.sortBlownFrames('frameIndex')">Frame #</th>
+            <th class="sort-header" id="blownSortTimeHeader" onclick="app.sortBlownFrames('timeUs')">Time (µs)</th>
           </tr>
         </thead>
         <tbody id="blownFramesList"></tbody>
@@ -2926,7 +2715,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 
 <div class="modal-backdrop" id="avgTimeModal" role="presentation">
   <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="avgTimeModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="window._app && window._app.closeMetricModal('avgTimeModal')" aria-label="Close Average Time details">×</button>
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('avgTimeModal')" aria-label="Close Average Time details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">📊</div>
       <div>
@@ -2958,7 +2747,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 
 <div class="modal-backdrop" id="maxTimeModal" role="presentation">
   <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="maxTimeModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="window._app && window._app.closeMetricModal('maxTimeModal')" aria-label="Close Maximum Time details">×</button>
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('maxTimeModal')" aria-label="Close Maximum Time details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">⏱️</div>
       <div>
@@ -2975,10 +2764,10 @@ body.light-theme #analysisDetail .metric-detail-section {
       <table class="metric-table">
         <thead>
           <tr>
-            <th class="sort-header" id="maxSortRankHeader" onclick="window._app && window._app.sortMaxFrames('rank')">Rank</th>
-            <th class="sort-header" id="maxSortFrameHeader" onclick="window._app && window._app.sortMaxFrames('frameIndex')">Frame #</th>
-            <th class="sort-header" id="maxSortTimeHeader" onclick="window._app && window._app.sortMaxFrames('timeUs')">Time (µs)</th>
-            <th class="sort-header" id="maxSortTimestampHeader" onclick="window._app && window._app.sortMaxFrames('timestamp')">Timestamp (s)</th>
+            <th class="sort-header" id="maxSortRankHeader" onclick="app.sortMaxFrames('rank')">Rank</th>
+            <th class="sort-header" id="maxSortFrameHeader" onclick="app.sortMaxFrames('frameIndex')">Frame #</th>
+            <th class="sort-header" id="maxSortTimeHeader" onclick="app.sortMaxFrames('timeUs')">Time (µs)</th>
+            <th class="sort-header" id="maxSortTimestampHeader" onclick="app.sortMaxFrames('timestamp')">Timestamp (s)</th>
           </tr>
         </thead>
         <tbody id="maxFramesList"></tbody>
@@ -3000,7 +2789,7 @@ body.light-theme #analysisDetail .metric-detail-section {
 
 <div class="modal-backdrop" id="peakFrameModal" role="presentation">
   <div class="metric-modal-card" role="dialog" aria-modal="true" aria-labelledby="peakFrameModalTitle" aria-hidden="true">
-    <button class="metric-modal-close-btn" onclick="window._app && window._app.closeMetricModal('peakFrameModal')" aria-label="Close Peak Frame details">×</button>
+    <button class="metric-modal-close-btn" onclick="app.closeMetricModal('peakFrameModal')" aria-label="Close Peak Frame details">×</button>
     <div class="metric-modal-header">
       <div class="metric-modal-icon">🎯</div>
       <div>
@@ -3168,6 +2957,8 @@ function drawChart() {
     }
   });
 }
+new ResizeObserver(drawChart).observe(document.querySelector('.chart-box'));
+
 // ── App controller ─────────────────────────────────────────────────────────────
 const app = (() => {
   let connected = false, running = false, canExport = false, canAnalyze = false, canDownloadExcel = false, analysisRunning = false;
@@ -3197,67 +2988,32 @@ const app = (() => {
   }
 
   function setTheme(theme) {
-    console.log('[setTheme] Setting theme to:', theme);
     const isDark = theme === 'dark';
-    
-    // Apply theme class
     if (isDark) {
       document.body.classList.remove('light-theme');
     } else {
       document.body.classList.add('light-theme');
     }
-    console.log('[setTheme] body.classList after:', Array.from(document.body.classList));
-    
-    // Force style update by directly modifying body element
-    document.body.style.transition = 'background 0.3s ease, color 0.3s ease';
-    
     localStorage.setItem('theme', theme);
-    console.log('[setTheme] Saved to localStorage:', localStorage.getItem('theme'));
-    
     updateThemeIcons(isDark);
-    
-    // Force browser repaint before chart redraw
-    setTimeout(() => {
-      console.log('[setTheme] Drawing chart after theme change');
-      requestAnimationFrame(() => {
-        drawChart();
-        if (currentMetricShown) _refreshCurrentPanel();
-      });
-    }, 50);
+    drawChart();
   }
 
   function toggleTheme() {
     const currentTheme = document.body.classList.contains('light-theme') ? 'light' : 'dark';
-    console.log('[toggleTheme] Current theme:', currentTheme);
     const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-    console.log('[toggleTheme] Switching to:', newTheme);
     setTheme(newTheme);
   }
 
   function updateThemeIcons(isDark) {
     const sunIcon = document.getElementById('sunIcon');
     const moonIcon = document.getElementById('moonIcon');
-    const themeToggle = document.getElementById('themeToggle');
 
-    if (sunIcon) sunIcon.style.display = isDark ? 'block' : 'none';
-    if (moonIcon) moonIcon.style.display = isDark ? 'none' : 'block';
-    if (themeToggle) {
-      const nextTheme = isDark ? 'light' : 'dark';
-      const title = `Switch to ${nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1)} Theme`;
-      themeToggle.title = title;
-      themeToggle.setAttribute('aria-label', title);
-    }
+    sunIcon.style.display = isDark ? 'block' : 'none';
+    moonIcon.style.display = isDark ? 'none' : 'block';
   }
 
-  function bindThemeToggle() {
-    const themeToggle = document.getElementById('themeToggle');
-    if (!themeToggle || themeToggle.dataset.themeToggleBound === 'true') return;
-
-    themeToggle.addEventListener('click', toggleTheme);
-    themeToggle.dataset.themeToggleBound = 'true';
-  }
-
-  bindThemeToggle();
+  document.getElementById('themeToggle').addEventListener('click', toggleTheme);
 
   function showAlert(title, body, type) {
     const overlay = document.getElementById("alertOverlay");
@@ -3315,24 +3071,18 @@ const app = (() => {
     // Control ML flow buttons
     document.getElementById('btnAnalyze').disabled = !canAnalyze || analysisRunning;
     document.getElementById('btnDownloadExcel').disabled = !canDownloadExcel;
-
-    // Show "Start Analysis" prompt when connected but not running
-    const promptElement = document.getElementById('startAnalysisPrompt');
-    if (promptElement) {
-      if (connected && !running) {
-        promptElement.classList.add('show');
-      } else {
-        promptElement.classList.remove('show');
-      }
-    }
   }
 
   function showChartView() {
-    if (currentOpenModal && currentOpenModal.id.endsWith('Modal')) {
-      closeMetricModal(currentOpenModal.id);
-    }
+    const chartView = document.getElementById('chartView');
+    const analysisDetail = document.getElementById('analysisDetail');
+    chartView.style.display = 'block';
+    analysisDetail.style.display = 'none';
+    ['frameBlown','avgTime','maxTime','peakFrame','generic'].forEach(k => {
+      const el = document.getElementById(k === 'generic' ? 'inline_generic' : 'inline_' + k);
+      if (el) el.style.display = 'none';
+    });
     currentMetricShown = null;
-    drawChart();
   }
 
   function setStats(blown, avgUs, maxUs, maxFrame) {
@@ -3361,340 +3111,137 @@ const app = (() => {
       metricData.blownFrames = metricData.allFrames
         .filter(f => f.isBlown)
         .sort((a, b) => b.timeUs - a.timeUs);
-    } else {
-      metricData.frameCount = 0;
-      metricData.totalTime = 0;
-      metricData.allFrames = [];
-      metricData.maxFrames = [];
-      metricData.blownFrames = [];
     }
   }
 
 async function refreshPorts() {
-    function _prepareDashboardCanvas(canvas) {
-      if (!canvas || !canvas.parentElement) return null;
-      const box = canvas.parentElement.getBoundingClientRect();
-      const W = Math.max(0, box.width);
-      const H = Math.max(0, box.height);
-      if (W === 0 || H === 0) return null;
-
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(W * dpr);
-      canvas.height = Math.round(H * dpr);
-      const ctx = canvas.getContext('2d');
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, W, H);
-      return { ctx, W, H, isLightTheme: document.body.classList.contains('light-theme') };
-    }
-
-    function _drawCanvasPlaceholder(ctx, W, H, title, subtitle, isLightTheme) {
-      ctx.save();
-      ctx.fillStyle = isLightTheme ? '#6b7280' : '#8a8f9f';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = "600 14px 'Inter', sans-serif";
-      ctx.fillText(title, W / 2, H / 2 - 8);
-      ctx.font = "11px 'Inter', sans-serif";
-      ctx.fillText(subtitle, W / 2, H / 2 + 12);
-      ctx.restore();
-    }
-
-    function drawChart() {
-      _drawBlownDashboardCard();
-      _drawAverageDashboardCard();
-      _drawPeakTimeDashboardCard();
-      _drawPeakFrameDashboardCard();
-    }
-
-    function _drawBlownDashboardCard() {
-      const canvas = document.getElementById('chartBlown');
-      const state = _prepareDashboardCanvas(canvas);
-      if (!state) return;
-
-      const { ctx, W, H, isLightTheme } = state;
-      const frameCount = metricData.frameCount || (latestChunk && latestChunk.length) || 0;
-      const blown = Number(metricData.blown || 0);
-      const safe = Math.max(0, frameCount - blown);
-      const total = Math.max(0, blown + safe);
-      const pct = total > 0 ? (blown / total) * 100 : 0;
-
-      _setText('blownCardValue', blown.toLocaleString());
-      _setText('blownCardFoot', total > 0 ? `${safe.toLocaleString()} normal / ${blown.toLocaleString()} blown` : 'Waiting for live data');
-      if (total <= 0) {
-        _drawCanvasPlaceholder(ctx, W, H, 'No live frames yet', 'Start analysis to populate this donut', isLightTheme);
-        return;
-      }
-
-      const cx = W / 2;
-      const cy = H / 2 + 4;
-      const radius = Math.min(W, H) * 0.28;
-      const lineWidth = Math.max(18, Math.min(W, H) * 0.14);
-      const start = -Math.PI / 2;
-      const blownAngle = (Math.PI * 2) * (blown / total);
-
-      ctx.lineWidth = lineWidth;
-      ctx.lineCap = 'round';
-
-      ctx.strokeStyle = isLightTheme ? '#2563eb' : '#60a5fa';
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, start + blownAngle, start + Math.PI * 2, false);
-      ctx.stroke();
-
-      ctx.strokeStyle = isLightTheme ? '#dc2626' : '#ef4444';
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, start, start + blownAngle, false);
-      ctx.stroke();
-
-      ctx.fillStyle = isLightTheme ? '#ffffff' : 'rgba(15, 23, 42, 0.98)';
-      ctx.beginPath();
-      ctx.arc(cx, cy, Math.max(0, radius - lineWidth / 2 - 2), 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = isLightTheme ? '#111827' : '#f8fafc';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = "700 24px 'JetBrains Mono', monospace";
-      ctx.fillText(blown.toLocaleString(), cx, cy - 8);
-      ctx.font = "11px 'Inter', sans-serif";
-      ctx.fillStyle = isLightTheme ? '#6b7280' : '#94a3b8';
-      ctx.fillText(`${pct.toFixed(1)}% of frames`, cx, cy + 14);
-    }
-
-    function _drawAverageDashboardCard() {
-      const canvas = document.getElementById('chartAvg');
-      const state = _prepareDashboardCanvas(canvas);
-      if (!state) return;
-
-      const { ctx, W, H, isLightTheme } = state;
-      const avgs = metricData.frameAvgs || [];
-      const avgUs = Number(metricData.avgUs || 0);
-      const frameCount = metricData.frameCount || avgs.length || 0;
-
-      _setText('avgCardValue', `${avgUs.toLocaleString()} µs`);
-      _setText('avgCardFoot', frameCount > 0 ? `${frameCount.toLocaleString()} frames sampled` : 'Waiting for live data');
-      if (!avgs || avgs.length < 2) {
-        _drawCanvasPlaceholder(ctx, W, H, 'No average trace yet', 'The per-frame latency line will appear here', isLightTheme);
-        return;
-      }
-
-      const pad = { t: 14, r: 16, b: 26, l: 44 };
-      const iW = W - pad.l - pad.r;
-      const iH = H - pad.t - pad.b;
-      const maxVal = Math.max(...avgs, THRESHOLD_US * 1.15);
-
-      for (let p = 0; p <= 100; p += 25) {
-        const y = pad.t + iH - (p / 100) * iH;
-        ctx.strokeStyle = isLightTheme ? 'rgba(148, 163, 184, 0.25)' : 'rgba(80, 88, 112, 0.3)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(pad.l, y);
-        ctx.lineTo(pad.l + iW, y);
-        ctx.stroke();
-      }
-
-      const thresholdY = pad.t + iH - (THRESHOLD_US / maxVal) * iH;
-      ctx.strokeStyle = isLightTheme ? '#d97706' : '#f59e0b';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      ctx.moveTo(pad.l, thresholdY);
-      ctx.lineTo(pad.l + iW, thresholdY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      const points = avgs.map((value, index) => ({
-        x: pad.l + (index / (avgs.length - 1)) * iW,
-        y: pad.t + iH - (value / maxVal) * iH,
-        value
-      }));
-
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, pad.t + iH);
-      points.forEach(point => ctx.lineTo(point.x, point.y));
-      ctx.lineTo(points[points.length - 1].x, pad.t + iH);
-      ctx.closePath();
-      const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + iH);
-      grad.addColorStop(0, isLightTheme ? 'rgba(37, 99, 235, 0.24)' : 'rgba(59, 130, 246, 0.28)');
-      grad.addColorStop(1, isLightTheme ? 'rgba(37, 99, 235, 0.02)' : 'rgba(59, 130, 246, 0.02)');
-      ctx.fillStyle = grad;
-      ctx.fill();
-
-      ctx.beginPath();
-      points.forEach((point, index) => {
-        if (index === 0) ctx.moveTo(point.x, point.y);
-        else ctx.lineTo(point.x, point.y);
+    const icon = document.getElementById('refreshIcon');
+    icon.classList.add('spin');
+    const ports = JSON.parse(await window.pywebview.api.get_ports());
+    icon.classList.remove('spin');
+    
+    const sel = document.getElementById('portSel');
+    const prev = sel.value;
+    
+    if (ports.length === 0) {
+      sel.innerHTML = '<option value="">No USB ports found</option>';
+    } else {
+      sel.innerHTML = ''; // Clear existing options
+      
+      // Populate the dropdown with USB ports
+      ports.forEach(p => {
+        const o = document.createElement('option');
+        o.value = o.textContent = p;
+        sel.appendChild(o);
       });
-      ctx.strokeStyle = isLightTheme ? '#2563eb' : '#60a5fa';
-      ctx.lineWidth = 2;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.stroke();
-
-      ctx.fillStyle = isLightTheme ? '#dc2626' : '#ef4444';
-      points.forEach(point => {
-        if (point.value > THRESHOLD_US) {
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, 2.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-
-      ctx.fillStyle = isLightTheme ? '#6b7280' : '#8a8f9f';
-      ctx.font = "10px 'JetBrains Mono', monospace";
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText('Frame 0', pad.l, H - 4);
-      ctx.textAlign = 'right';
-      ctx.fillText(`Frame ${avgs.length - 1}`, pad.l + iW, H - 4);
+      
+      // Auto-select logic: 
+      // Keep the previous selection if it's still plugged in, 
+      // otherwise default to the first USB port in the list.
+      if (ports.includes(prev)) {
+        sel.value = prev;
+      } else {
+        sel.value = ports[0];
+      }
     }
+  }
 
-    function _drawPeakTimeDashboardCard() {
-      const canvas = document.getElementById('chartPeakTime');
-      const state = _prepareDashboardCanvas(canvas);
-      if (!state) return;
-
-      const { ctx, W, H, isLightTheme } = state;
-      const sessionMax = Number(metricData.maxUs || 0);
-      const over = sessionMax - THRESHOLD_US;
-      const scaleMax = Math.max(THRESHOLD_US * 1.75, sessionMax * 1.2, THRESHOLD_US + 500);
-      const ratio = scaleMax > 0 ? Math.min(sessionMax / scaleMax, 1) : 0;
-      const thresholdRatio = Math.min(THRESHOLD_US / scaleMax, 1);
-      const warningRatio = Math.min((THRESHOLD_US * 1.25) / scaleMax, 1);
-
-      _setText('peakTimeCardValue', `${sessionMax.toLocaleString()} µs`);
-      _setText('peakTimeCardFoot', over > 0 ? `+${over.toLocaleString()} µs over threshold` : 'Within threshold');
-      if (sessionMax <= 0) {
-        _drawCanvasPlaceholder(ctx, W, H, 'No peak time yet', 'The gauge will fill as frames arrive', isLightTheme);
+  async function toggleConnect() {
+    if (connected) {
+      // FIX: Check backend response before aggressively tearing down the UI state
+      const r = JSON.parse(await window.pywebview.api.disconnect());
+      if (r.status === 'error') {
+        showAlert("Action Denied", r.message, "warning");
         return;
       }
-
-      const cx = W / 2;
-      const cy = H * 0.78;
-      const radius = Math.min(W * 0.36, H * 0.42);
-      const start = Math.PI * 1.05;
-      const end = Math.PI * 1.95;
-      const sweep = end - start;
-      const lineWidth = Math.max(14, Math.min(W, H) * 0.08);
-
-      ctx.lineCap = 'round';
-      ctx.lineWidth = lineWidth;
-      ctx.strokeStyle = isLightTheme ? 'rgba(148, 163, 184, 0.20)' : 'rgba(80, 88, 112, 0.35)';
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, start, end, false);
-      ctx.stroke();
-
-      const drawArcSegment = (fromRatio, toRatio, color) => {
-        if (toRatio <= fromRatio) return;
-        ctx.strokeStyle = color;
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, start + sweep * fromRatio, start + sweep * toRatio, false);
-        ctx.stroke();
-      };
-
-      drawArcSegment(0, Math.min(thresholdRatio, 1), isLightTheme ? '#10b981' : '#34d399');
-      drawArcSegment(thresholdRatio, Math.min(warningRatio, 1), isLightTheme ? '#f59e0b' : '#fbbf24');
-      drawArcSegment(warningRatio, ratio, isLightTheme ? '#dc2626' : '#ef4444');
-
-      const needleAngle = start + sweep * ratio;
-      const needleX = cx + Math.cos(needleAngle) * (radius - lineWidth * 0.35);
-      const needleY = cy + Math.sin(needleAngle) * (radius - lineWidth * 0.35);
-      ctx.strokeStyle = isLightTheme ? '#2563eb' : '#60a5fa';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(needleX, needleY);
-      ctx.stroke();
-
-      ctx.fillStyle = isLightTheme ? '#2563eb' : '#60a5fa';
-      ctx.beginPath();
-      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = isLightTheme ? '#111827' : '#f8fafc';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = "700 22px 'JetBrains Mono', monospace";
-      ctx.fillText(sessionMax.toLocaleString(), cx, cy - 28);
-      ctx.font = "11px 'Inter', sans-serif";
-      ctx.fillStyle = isLightTheme ? '#6b7280' : '#94a3b8';
-      ctx.fillText('2000 µs threshold', cx, cy - 8);
-      ctx.fillText(over > 0 ? `Over by ${over.toLocaleString()} µs` : 'Within threshold', cx, cy + 10);
-    }
-
-    function _drawPeakFrameDashboardCard() {
-      const canvas = document.getElementById('chartPeakFrame');
-      const state = _prepareDashboardCanvas(canvas);
-      if (!state) return;
-
-      const { ctx, W, H, isLightTheme } = state;
-      const topFrames = (metricData.top10 || []).slice(0, 5);
-      const peakFrame = Number(metricData.maxFrame || 0);
-      const peakTime = Number(metricData.maxUs || 0);
-
-      _setText('peakFrameCardValue', `Frame ${peakFrame.toLocaleString()}`);
-      _setText('peakFrameCardFoot', peakTime > 0 ? `${peakTime.toLocaleString()} µs peak` : 'Waiting for live data');
-      if (!topFrames || topFrames.length === 0) {
-        _drawCanvasPlaceholder(ctx, W, H, 'No peak frame yet', 'Top-ranked frames will appear here', isLightTheme);
-        return;
+      
+      connected = false; running = false; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
+      updateUsbStatus(false);
+      showAlert("Disconnected", "Successfully disconnected from the port.", "warning");
+    } else {
+      const port = document.getElementById('portSel').value;
+      const baud = document.getElementById('baudSel').value;
+      if (!port) { showAlert("Warning", "Select a COM port first.", "warning"); return; }
+      const r = JSON.parse(await window.pywebview.api.connect(port, baud));
+      if (r.status === 'ok') {
+        connected = true;
+        updateUsbStatus(true);
+      } else {
+        updateUsbStatus(false);
+        showAlert("Connection Failed", r.message, "error");
       }
-
-      const pad = { t: 16, r: 18, b: 20, l: 86 };
-      const iW = W - pad.l - pad.r;
-      const iH = H - pad.t - pad.b;
-      const rowGap = 10;
-      const rowH = Math.max(14, (iH - rowGap * (topFrames.length - 1)) / topFrames.length);
-      const maxVal = Math.max(topFrames[0].timeUs, THRESHOLD_US * 1.05);
-      const thresholdX = pad.l + (THRESHOLD_US / maxVal) * iW;
-
-      ctx.strokeStyle = isLightTheme ? '#d97706' : '#f59e0b';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      ctx.moveTo(thresholdX, pad.t);
-      ctx.lineTo(thresholdX, pad.t + iH);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      topFrames.forEach((frame, index) => {
-        const y = pad.t + index * (rowH + rowGap);
-        const width = Math.max(1, (frame.timeUs / maxVal) * iW);
-        const isPeak = index === 0;
-        const barColor = isPeak
-          ? (isLightTheme ? '#f59e0b' : '#fbbf24')
-          : (isLightTheme ? '#60a5fa' : '#93c5fd');
-        const labelColor = isPeak ? (isLightTheme ? '#111827' : '#f8fafc') : (isLightTheme ? '#374151' : '#d1d5db');
-
-        ctx.fillStyle = labelColor;
-        ctx.font = isPeak ? "700 11px 'JetBrains Mono', monospace" : "600 11px 'JetBrains Mono', monospace";
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`Frame ${frame.frameIndex}`, pad.l - 10, y + rowH / 2);
-
-        const grad = ctx.createLinearGradient(pad.l, 0, pad.l + width, 0);
-        grad.addColorStop(0, barColor);
-        grad.addColorStop(1, isPeak ? (isLightTheme ? '#fcd34d' : '#fde68a') : barColor);
-        ctx.fillStyle = grad;
-        ctx.fillRect(pad.l, y, width, rowH);
-
-        ctx.strokeStyle = isPeak ? (isLightTheme ? '#b45309' : '#f59e0b') : (isLightTheme ? 'rgba(37, 99, 235, 0.35)' : 'rgba(96, 165, 250, 0.35)');
-        ctx.lineWidth = 1;
-        ctx.strokeRect(pad.l, y, width, rowH);
-
-        ctx.fillStyle = isLightTheme ? '#6b7280' : '#94a3b8';
-        ctx.font = "10px 'Inter', sans-serif";
-        ctx.textAlign = 'left';
-        ctx.fillText(`${frame.timeUs.toLocaleString()} µs`, pad.l + width + 6, y + rowH / 2 + 0.5);
-      });
     }
+    sync();
+  }
 
-    const dashboardResizeObserver = new ResizeObserver(() => {
-      drawChart();
-      if (currentMetricShown) _refreshCurrentPanel();
-    });
-    const dashboardRoot = document.querySelector('.analysis-dashboard');
-    if (dashboardRoot) {
-      dashboardResizeObserver.observe(dashboardRoot);
+  async function startAnalysis() {
+    const r = JSON.parse(await window.pywebview.api.start_analysis());
+    if (r.status === 'ok') {
+      running = true; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
+      latestChunk = null;
+      metricData.blownFramesList = [];
+      metricData.frameAvgs = [];
+      metricData.top10 = [];
+      showChartView();
+      setStats(0, 0, 0, 0); drawChart();
+      showAlert("Analysis Started", "Receiving chunks every second...", "info");
+    } else {
+      showAlert("Start Failed", r.message, "error");
     }
+    sync();
+  }
+
+  async function stopAnalysis() {
+    const r = JSON.parse(await window.pywebview.api.stop_analysis());
+    running = false;
+    if (r.status === 'ok') {
+      showChartView();
+      canExport = true;
+      canAnalyze = true;
+      canDownloadExcel = false;
+      showAlert("Analysis Complete", r.message + (r.ack_received ? ' (ACK received)' : ' (ACK timeout)'), "success");
+      const s = JSON.parse(await window.pywebview.api.get_summary());
+      setStats(s.blown, s.avg_us, s.max_us, s.max_frame);
+    } else {
+      showAlert("Stop Error", r.message, "error");
+    }
+    sync();
+  }
+
+  async function exportCsv() {
+    const r = JSON.parse(await window.pywebview.api.export_csv());
+    
+    if (r.status === 'ok') {
+      showAlert("Export Successful", `Saved ${Number(r.rows).toLocaleString()} rows → ${r.path}`, "success");
+    } else if (r.status === 'cancelled') {
+    } else {
+      showAlert("Export Error", r.message, "error");
+    }
+  }
+
+  function onChunk(data) {
+    latestChunk = data.frame_data;
+
+    // Accumulate blown frames (delta from this chunk only)
+    if (data.new_blown_frames && data.new_blown_frames.length > 0) {
+      metricData.blownFramesList = metricData.blownFramesList.concat(data.new_blown_frames);
+    }
+    // Update per-frame averages and top-10 sent by backend
+    if (data.frame_avgs) metricData.frameAvgs = data.frame_avgs;
+    if (data.top10)       metricData.top10      = data.top10;
+
+    setStats(data.blown, data.avg_us, data.max_us, data.max_frame);
+    drawChart();
+
+    // Live-refresh whichever panel is open
+    if (currentMetricShown) _refreshCurrentPanel();
+  }
+
+  async function onError(msg) {
+    // 1. Stop all active operational flags
+    running = false; 
+    analysisRunning = false; 
+    
     // 2. Force the UI connection state to false
     connected = false;
     
@@ -3745,14 +3292,13 @@ async function refreshPorts() {
     }
   }
 
-  async function exportAnalysis() {
-    const r = JSON.parse(await window.pywebview.api.export_analysis());
+  async function downloadExcel() {
+    const r = JSON.parse(await window.pywebview.api.download_excel());
     if (r.status === 'ok') {
-      const extra = r.anomaly_csv_path ? `\nAnomalies CSV exported → ${r.anomaly_csv_path}` : '';
-      showAlert("Export Successful", `Excel exported → ${r.excel_path}\nPDF exported → ${r.pdf_path}${extra}`, "success");
+      showAlert("Download Successful", `Excel downloaded → ${r.path}`, "success");
     } else if (r.status === 'cancelled') {
     } else {
-      showAlert("Export Error", r.message, "error");
+      showAlert("Download Error", r.message, "error");
     }
   }
 
@@ -3838,31 +3384,10 @@ async function refreshPorts() {
   }
 
   function openMetricModal(modalId) {
-    const mapping = {
-      frameBlownModal: 'frameBlown',
-      avgTimeModal: 'avgTime',
-      maxTimeModal: 'maxTime',
-      peakFrameModal: 'peakFrame'
-    };
-    const metricKey = mapping[modalId];
-    const modal = document.getElementById(modalId);
-    if (!metricKey || !modal) return;
-
-    if (currentOpenModal && currentOpenModal.id !== modalId) {
-      closeMetricModal(currentOpenModal.id);
-    }
-
-    if (currentOpenModal && currentOpenModal.id === modalId) {
-      return;
-    }
-
-    previousFocusedElement = document.activeElement;
-    currentMetricShown = metricKey;
-    currentOpenModal = modal;
-    modal.classList.add('show');
-    modal.setAttribute('aria-hidden', 'false');
-    trapFocus(modal);
-    _refreshCurrentPanel();
+    if (modalId === 'frameBlownModal') return toggleMetricView('frameBlown');
+    if (modalId === 'avgTimeModal') return toggleMetricView('avgTime');
+    if (modalId === 'maxTimeModal') return toggleMetricView('maxTime');
+    if (modalId === 'peakFrameModal') return toggleMetricView('peakFrame');
   }
 
   function closeMetricModal(modalId) {
@@ -3872,7 +3397,6 @@ async function refreshPorts() {
       modal.setAttribute('aria-hidden', 'true');
       releaseFocus(modal);
       currentOpenModal = null;
-      currentMetricShown = null;
       
       if (previousFocusedElement && document.body.contains(previousFocusedElement)) {
         setTimeout(() => previousFocusedElement.focus(), 100);
@@ -3881,21 +3405,29 @@ async function refreshPorts() {
   }
 
   function toggleMetricView(metricKey) {
-    const mapping = {
-      frameBlown: 'frameBlownModal',
-      avgTime: 'avgTimeModal',
-      maxTime: 'maxTimeModal',
-      peakFrame: 'peakFrameModal'
-    };
-    const modalId = mapping[metricKey];
-    if (!modalId) return;
+    const chartView = document.getElementById('chartView');
+    const analysisDetail = document.getElementById('analysisDetail');
 
-    if (currentMetricShown === metricKey && currentOpenModal && currentOpenModal.id === modalId) {
-      closeMetricModal(modalId);
+    if (currentMetricShown === metricKey) {
+      currentMetricShown = null;
+      ['frameBlown','avgTime','maxTime','peakFrame'].forEach(k => {
+        const el = document.getElementById('inline_' + k);
+        if (el) el.style.display = 'none';
+      });
+      analysisDetail.style.display = 'none';
+      chartView.style.display = 'block';
       return;
     }
 
-    openMetricModal(modalId);
+    currentMetricShown = metricKey;
+    chartView.style.display = 'none';
+    analysisDetail.style.display = 'flex';
+    ['frameBlown','avgTime','maxTime','peakFrame'].forEach(k => {
+      const el = document.getElementById('inline_' + k);
+      if (el) el.style.display = (k === metricKey) ? 'flex' : 'none';
+    });
+
+    _refreshCurrentPanel();
   }
 
   // ── Internal helpers ─────────────────────────────────────────
@@ -4186,7 +3718,6 @@ async function refreshPorts() {
 
   window.addEventListener('pywebviewready', () => {
     initTheme();
-    bindThemeToggle();
     refreshPorts();
     showAlert("Tool Ready", "Select a port and connect to begin.", "info");
     drawChart();
@@ -4194,7 +3725,7 @@ async function refreshPorts() {
     document.addEventListener('keydown', handleGlobalKeyboard);
   });
 
-  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, exportAnalysis, onAnalysisComplete, onAnalysisError, showAlert, closeAlert, showLoading, hideLoading, openMetricModal, closeMetricModal, toggleMetricView, sortBlownInline };
+  return { toggleTheme, toggleConnect, startAnalysis, stopAnalysis, exportCsv, refreshPorts, onChunk, onError, analyze, downloadExcel, onAnalysisComplete, onAnalysisError, showAlert, closeAlert, showLoading, hideLoading, openMetricModal, closeMetricModal, toggleMetricView, sortBlownInline };
 })();
 
 window._app = app;
