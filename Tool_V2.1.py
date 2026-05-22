@@ -2668,10 +2668,6 @@ body.light-theme #analysisDetail .metric-detail-section {
       <span class="nav-icon">📊</span>
       <span class="nav-label">Dashboard</span>
     </button>
-    <button class="nav-item" onclick="sidebarSetActive(this, 'live-monitor')">
-      <span class="nav-icon">📡</span>
-      <span class="nav-label">Live Monitor</span>
-    </button>
     <button class="nav-item" onclick="sidebarSetActive(this, 'latency')">
       <span class="nav-icon">⏱️</span>
       <span class="nav-label">Latency</span>
