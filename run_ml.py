@@ -76,9 +76,7 @@ def _build_reason_text(
     stds,
     deltas,
     row_threshold_flag,
-    warning_mask,
     critical_mask,
-    unstable_mask,
 ):
     reasons = []
 
@@ -92,7 +90,6 @@ def _build_reason_text(
             )
 
     critical_frames = [col for col in frame_cols if critical_mask.loc[row_idx, col]]
-    # warning_frames removed - only critical anomalies now
 
     def frame_reason(col, level):
         actual_val = float(df.loc[row_idx, col])
@@ -207,11 +204,17 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
 
     critical_count = int((out_df["Status"] == STATUS_SPIKE).sum())
     anomalies = int((out_df["Status"] != STATUS_NORMAL).sum())
+    
+    # Count RowWise and ColumnWise detections for metrics
+    frames_blown = int((out_df["Detection_Type"].str.contains("RowWise", na=False)).sum())
+    spikes_detected = int((out_df["Detection_Type"].str.contains("ColumnWise", na=False)).sum())
 
     meta = {
         "rows": len(out_df),
         "anomalies": anomalies,
         "critical": critical_count,
+        "frames_blown": frames_blown,
+        "spikes_detected": spikes_detected,
         "avg_latency": float(work_df[frame_cols].mean().mean()),
         "max_latency": float(work_df[frame_cols].max().max()),
         "health_score": float(pd.Series(health_scores).mean() if health_scores else 100.0),
@@ -253,19 +256,6 @@ def generate_visualizations(analyzed_df: pd.DataFrame, frame_cols: list[str], ch
 
     chart_paths = {}
 
-    # 1. Latency distribution
-    stacked = analyzed_df[frame_cols].stack().reset_index(drop=True)
-    plt.figure(figsize=(10, 4))
-    sns.histplot(stacked, bins=60, kde=True, color="#2563eb")
-    plt.title("Latency Distribution")
-    plt.xlabel("Latency (us)")
-    plt.ylabel("Frequency")
-    plt.tight_layout()
-    p1 = os.path.join(charts_dir, "latency_distribution.png")
-    plt.savefig(p1, dpi=160)
-    plt.close()
-    chart_paths["latency_distribution"] = p1
-
     # 2. Anomaly frequency graph
     plt.figure(figsize=(8, 4))
     counts = analyzed_df["Status"].value_counts().reindex([STATUS_NORMAL, STATUS_SPIKE], fill_value=0)
@@ -292,7 +282,6 @@ def generate_visualizations(analyzed_df: pd.DataFrame, frame_cols: list[str], ch
     plt.close()
     chart_paths["spike_timeline"] = p3
 
-    # 4. Frame instability chart - removed (no instability data in simplified model)
 
     # 5. Top critical frame chart
     top_crit = analyzed_df[analyzed_df["Status"] == STATUS_SPIKE]
@@ -365,9 +354,9 @@ def generate_pdf_report(
         _table(
             [
                 ["Metric", "Value"],
-                ["Active Time", f"{meta['rows']:,}"],
-                ["Total Anomalies (Critical)", f"{meta['anomalies']:,}"],
-                ["Critical Rows", f"{meta['critical']:,}"],
+                ["Active Time (seconds)", f"{meta['rows']:,}"],
+                ["Frames Blown", f"{meta['frames_blown']:,}"],
+                ["Spikes Detected", f"{meta['spikes_detected']:,}"],
                 ["Maximum Time", f"{meta['max_latency']:.2f} us"],
                 ["Average Time", f"{meta['avg_latency']:.2f} us"],
                 ["Overall Throughput %", ]
@@ -376,16 +365,20 @@ def generate_pdf_report(
             header_bg="#1d4ed8",
         )
     )
+    story.append(Spacer(1, 0.15 * inch))
+
+    # Add Anomaly Frequency chart to first page
+    if "anomaly_frequency" in chart_paths and os.path.exists(chart_paths["anomaly_frequency"]):
+        story.append(Paragraph("Anomaly Frequency", h2))
+        story.append(Image(chart_paths["anomaly_frequency"], width=3.5 * inch, height=2.0 * inch))
+        story.append(Spacer(1, 0.1 * inch))
+
+    # Add Top Critical Frames chart to first page
+    if "top_critical_frames" in chart_paths and os.path.exists(chart_paths["top_critical_frames"]):
+        story.append(Paragraph("Top 10 Maximum Frames Graph", h2))
+        story.append(Image(chart_paths["top_critical_frames"], width=5.5 * inch, height=2.0 * inch))
+
     story.append(PageBreak())
-
-    
-
-    # Row-wise and column-wise findings
-    story.append(Paragraph("Summary", h2))
-    rowwise = int((analyzed_df["Detection_Type"].str.contains("RowWise", na=False)).sum())
-    colwise = int((analyzed_df["Detection_Type"].str.contains("ColumnWise", na=False)).sum())
-    story.append(_table([["Category", "Count"], ["Frames blown", rowwise], ["Spike", colwise]]))
-    story.append(Spacer(1, 0.1 * inch))
 
     # Critical frame ranking
     story.append(Paragraph("Top 10 Maximum Frame Times", h2))
@@ -399,29 +392,25 @@ def generate_pdf_report(
     for i, (f, v) in enumerate(top_vals.items(), start=1):
         ranking_table.append([i, f, f"{float(v):.2f}"])
     story.append(_table(ranking_table, col_widths=[0.8 * inch, 2.2 * inch, 2.8 * inch], header_bg="#dc2626"))
-    story.append(PageBreak())
 
-    # ML explanations
-    story.append(Paragraph("ML-generated Explanations", h2))
-    explanations = analyzed_df[analyzed_df["Status"] != STATUS_NORMAL][["Time_Second", "Status", "Anomaly_Reason"]].head(12)
-    if explanations.empty:
-        story.append(Paragraph("No anomalies detected.", styles["Normal"]))
-    else:
-        for _, row in explanations.iterrows():
-            story.append(
-                Paragraph(
-                    f"<b>T={int(row['Time_Second'])}</b> [{row['Status']}] {row['Anomaly_Reason'][:360]}",
-                    styles["Normal"],
-                )
-            )
-            story.append(Spacer(1, 0.05 * inch))
+    # # ML explanations
+    # story.append(Paragraph("ML-generated Explanations", h2))
+    # explanations = analyzed_df[analyzed_df["Status"] != STATUS_NORMAL][["Time_Second", "Status", "Anomaly_Reason"]].head(12)
+    # if explanations.empty:
+    #     story.append(Paragraph("No anomalies detected.", styles["Normal"]))
+    # else:
+    #     for _, row in explanations.iterrows():
+    #         story.append(
+    #             Paragraph(
+    #                 f"<b>T={int(row['Time_Second'])}</b> [{row['Status']}] {row['Anomaly_Reason'][:360]}",
+    #                 styles["Normal"],
+    #             )
+    #         )
+    #         story.append(Spacer(1, 0.05 * inch))
 
-    # Recommendations and conclusio
-    
-    
-    story.append(PageBreak())
+    # Build and save the PDF document
+    doc.build(story)
 
- 
 
 
 def run_pipeline(input_csv: str, output_dir: str):
@@ -437,6 +426,8 @@ def run_pipeline(input_csv: str, output_dir: str):
 
         pdf_path = os.path.join(output_dir, "analysis_report.pdf")
         generate_pdf_report(pdf_path, analyzed_df, meta, chart_paths, input_csv)
+    
+    # Temp directory is now cleaned up, but PDF has been generated with images embedded
 
     result = {
         "status": "success",
