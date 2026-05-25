@@ -22,6 +22,7 @@ import threading
 import time
 import sys
 import tempfile
+import zipfile
 from datetime import datetime
 
 import serial
@@ -217,22 +218,35 @@ class Api:
     def download_excel(self) -> str:
         if not self._analysis_pdf_path or not os.path.exists(self._analysis_pdf_path):
             return json.dumps({"status": "error", "message": "No analyzed PDF report is available."})
+        
+        if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
+            return json.dumps({"status": "error", "message": "No analyzed Excel file is available."})
 
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_name = f"throughput_{ts}_Analysis_Report.pdf"
+            default_zip_name = f"throughput_{ts}_Analysis.zip"
             result = window.create_file_dialog(
                 webview.FileDialog.SAVE,
-                save_filename=default_name,
-                file_types=["PDF Files (*.pdf)", "All files (*.*)"]
+                save_filename=default_zip_name,
+                file_types=["ZIP Files (*.zip)", "All files (*.*)"]
             )
 
             if not result:
                 return json.dumps({"status": "cancelled", "message": "Download cancelled."})
 
-            filepath = result if isinstance(result, str) else result[0]
-            shutil.copyfile(self._analysis_pdf_path, filepath)
-            return json.dumps({"status": "ok", "path": filepath})
+            zip_filepath = result if isinstance(result, str) else result[0]
+            
+            # Create ZIP file containing both PDF and Excel
+            with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # Add PDF report
+                pdf_filename = os.path.basename(self._analysis_pdf_path)
+                zipf.write(self._analysis_pdf_path, arcname=pdf_filename)
+                
+                # Add Excel file
+                excel_filename = os.path.basename(self._analysis_excel_path)
+                zipf.write(self._analysis_excel_path, arcname=excel_filename)
+            
+            return json.dumps({"status": "ok", "path": zip_filepath})
         except Exception as exc:
             return json.dumps({"status": "error", "message": str(exc)})
         
