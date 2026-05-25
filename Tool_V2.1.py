@@ -2659,7 +2659,7 @@ body.light-theme #analysisDetail .metric-detail-section {
   <!-- TOOL IDENTITY SECTION -->
   <div class="sidebar-identity">
     <h1 class="identity-title">Throughput</h1>
-    <p class="identity-subtitle">Tool v1.1</p>
+    <p class="identity-subtitle">Tool V2.1</p>
   </div>
   
   <!-- NAVIGATION MENU -->
