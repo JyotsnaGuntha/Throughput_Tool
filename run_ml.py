@@ -18,19 +18,15 @@ from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, S
 
 
 ROW_THRESHOLD_US = 2000.0
-WARN_Z = 2.0
 CRIT_Z = 3.0
-WARN_ABS_DIFF = 75.0
 CRIT_ABS_DIFF = 200.0
-WARN_DELTA = 120.0
 CRIT_DELTA = 250.0
 MIN_STD = 25.0
 MAX_REASON_FRAMES = 8
 ROLLING_WINDOW = 10
 
 STATUS_NORMAL = "Normal"
-STATUS_WARNING = "Warning"
-STATUS_CRITICAL = "Critical"
+STATUS_SPIKE = "Spike"
 
 COLOR_WARNING = "#ffe8cc"
 COLOR_CRITICAL = "#ff4d4f"
@@ -96,7 +92,7 @@ def _build_reason_text(
             )
 
     critical_frames = [col for col in frame_cols if critical_mask.loc[row_idx, col]]
-    warning_frames = [col for col in frame_cols if warning_mask.loc[row_idx, col] and col not in critical_frames]
+    # warning_frames removed - only critical anomalies now
 
     def frame_reason(col, level):
         actual_val = float(df.loc[row_idx, col])
@@ -115,14 +111,7 @@ def _build_reason_text(
     for col in critical_frames[:MAX_REASON_FRAMES]:
         reasons.append(frame_reason(col, "CRITICAL"))
 
-    remaining_slots = MAX_REASON_FRAMES - min(len(critical_frames), MAX_REASON_FRAMES)
-    for col in warning_frames[:remaining_slots]:
-        reasons.append(frame_reason(col, "WARNING"))
-
-    if unstable_mask.loc[row_idx]:
-        reasons.append("Temporal instability: moving-average drift and rolling variance spike detected")
-
-    extra_count = max(0, len(critical_frames) + len(warning_frames) - MAX_REASON_FRAMES)
+    extra_count = max(0, len(critical_frames) - MAX_REASON_FRAMES)
     if extra_count > 0:
         reasons.append(f"{extra_count} additional frame anomalies not shown")
 
@@ -144,32 +133,26 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
 
     rolling_mean = work_df[frame_cols].rolling(window=ROLLING_WINDOW, min_periods=1).mean()
     rolling_var = work_df[frame_cols].rolling(window=ROLLING_WINDOW, min_periods=1).var().fillna(0.0)
-    ma_instability = (work_df[frame_cols] - rolling_mean).abs() > WARN_ABS_DIFF
+    ma_instability = (work_df[frame_cols] - rolling_mean).abs() > CRIT_ABS_DIFF
     var_instability = rolling_var > (rolling_var.mean() + rolling_var.std(ddof=0)).fillna(0)
     unstable_mask = (ma_instability | var_instability).any(axis=1)
 
     critical_spike = (diff > 0) & ((z_scores >= CRIT_Z) | (abs_diff >= CRIT_ABS_DIFF) | (deltas >= CRIT_DELTA))
     critical_drop = (diff < 0) & ((z_scores >= CRIT_Z) | (abs_diff >= CRIT_ABS_DIFF) | (deltas <= -CRIT_DELTA))
-    warning_spike = (diff > 0) & ((z_scores >= WARN_Z) | (abs_diff >= WARN_ABS_DIFF) | (deltas >= WARN_DELTA))
-    warning_drop = (diff < 0) & ((z_scores >= WARN_Z) | (abs_diff >= WARN_ABS_DIFF) | (deltas <= -WARN_DELTA))
 
     critical_mask = critical_spike | critical_drop
-    warning_mask = (~critical_mask) & (warning_spike | warning_drop)
 
     has_critical = critical_mask.any(axis=1)
-    has_warning = warning_mask.any(axis=1)
 
     status = pd.Series(STATUS_NORMAL, index=work_df.index)
-    status.loc[row_isolation_flag | has_warning | unstable_mask] = STATUS_WARNING
-    status.loc[has_critical] = STATUS_CRITICAL
+    status.loc[row_isolation_flag | has_critical] = STATUS_SPIKE
 
     detection_type = pd.Series("None", index=work_df.index)
-    detection_type.loc[row_isolation_flag & ~(has_warning | has_critical)] = "RowWise"
-    detection_type.loc[(has_warning | has_critical) & ~row_isolation_flag] = "ColumnWise"
-    detection_type.loc[(has_warning | has_critical) & row_isolation_flag] = "RowWise+ColumnWise"
+    detection_type.loc[row_isolation_flag & ~has_critical] = "RowWise"
+    detection_type.loc[has_critical & ~row_isolation_flag] = "ColumnWise"
+    detection_type.loc[has_critical & row_isolation_flag] = "RowWise+ColumnWise"
 
     reasons = []
-    warning_frames_col = []
     critical_frames_col = []
     highlight_color_col = []
     severity_scores = []
@@ -181,20 +164,16 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
     severity_matrix = severity_matrix.fillna(0)
 
     for idx in work_df.index:
-        warning_frames = [col for col in frame_cols if warning_mask.loc[idx, col]]
         critical_frames = [col for col in frame_cols if critical_mask.loc[idx, col]]
 
-        warning_frames_col.append(",".join(warning_frames))
         critical_frames_col.append(",".join(critical_frames))
 
         row_severity = float(severity_matrix.loc[idx].mean())
         severity_scores.append(row_severity)
         health_scores.append(max(0.0, 100.0 - min(100.0, row_severity * 20.0)))
 
-        if status.loc[idx] == STATUS_CRITICAL:
+        if status.loc[idx] == STATUS_SPIKE:
             highlight_color_col.append(COLOR_CRITICAL)
-        elif status.loc[idx] == STATUS_WARNING:
-            highlight_color_col.append(COLOR_WARNING)
         else:
             highlight_color_col.append("")
 
@@ -210,9 +189,9 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
                     stds,
                     deltas,
                     row_isolation_flag,
-                    warning_mask,
+                    # warning_mask,
                     critical_mask,
-                    unstable_mask,
+                    # unstable_mask,
                 )
             )
 
@@ -220,29 +199,25 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
     out_df["Status"] = status
     out_df["Detection_Type"] = detection_type
     out_df["Anomaly_Reason"] = reasons
-    out_df["Warning_Frames"] = warning_frames_col
     out_df["Critical_Frames"] = critical_frames_col
     out_df["Highlight_Color"] = highlight_color_col
     out_df["Row_Anomaly_Score"] = work_df[frame_cols].max(axis=1)
     out_df["Severity_Score"] = severity_scores
     out_df["Frame_Health_Score"] = health_scores
-    out_df["Unstable_Flag"] = unstable_mask
 
-    critical_count = int((out_df["Status"] == STATUS_CRITICAL).sum())
-    warning_count = int((out_df["Status"] == STATUS_WARNING).sum())
+    critical_count = int((out_df["Status"] == STATUS_SPIKE).sum())
     anomalies = int((out_df["Status"] != STATUS_NORMAL).sum())
 
     meta = {
         "rows": len(out_df),
         "anomalies": anomalies,
         "critical": critical_count,
-        "warning": warning_count,
         "avg_latency": float(work_df[frame_cols].mean().mean()),
         "max_latency": float(work_df[frame_cols].max().max()),
         "health_score": float(pd.Series(health_scores).mean() if health_scores else 100.0),
     }
 
-    return out_df, warning_mask, critical_mask, meta
+    return out_df, critical_mask, meta
 
 
 def save_excel_and_csv(analyzed_df: pd.DataFrame, frame_cols: list[str], base_name: str, output_dir: str):
@@ -256,13 +231,11 @@ def save_excel_and_csv(analyzed_df: pd.DataFrame, frame_cols: list[str], base_na
         "Status",
         "Detection_Type",
         "Anomaly_Reason",
-        "Warning_Frames",
         "Critical_Frames",
         "Highlight_Color",
         "Row_Anomaly_Score",
         "Severity_Score",
         "Frame_Health_Score",
-        "Unstable_Flag",
     ] + frame_cols
 
     final_df = analyzed_df[ordered_cols]
@@ -295,8 +268,8 @@ def generate_visualizations(analyzed_df: pd.DataFrame, frame_cols: list[str], ch
 
     # 2. Anomaly frequency graph
     plt.figure(figsize=(8, 4))
-    counts = analyzed_df["Status"].value_counts().reindex([STATUS_NORMAL, STATUS_WARNING, STATUS_CRITICAL], fill_value=0)
-    sns.barplot(x=counts.index, y=counts.values, palette=["#10b981", "#f59e0b", "#ef4444"])
+    counts = analyzed_df["Status"].value_counts().reindex([STATUS_NORMAL, STATUS_SPIKE], fill_value=0)
+    sns.barplot(x=counts.index, y=counts.values, palette=["#10b981", "#ef4444"])
     plt.title("Anomaly Frequency")
     plt.ylabel("Rows")
     plt.tight_layout()
@@ -319,21 +292,10 @@ def generate_visualizations(analyzed_df: pd.DataFrame, frame_cols: list[str], ch
     plt.close()
     chart_paths["spike_timeline"] = p3
 
-    # 4. Frame instability chart
-    unstable_per_row = analyzed_df["Unstable_Flag"].astype(int)
-    plt.figure(figsize=(12, 3.5))
-    plt.plot(analyzed_df["Time_Second"], unstable_per_row, color="#dc2626")
-    plt.yticks([0, 1], ["Stable", "Unstable"])
-    plt.title("Frame Instability Timeline")
-    plt.xlabel("Time_Second")
-    plt.tight_layout()
-    p4 = os.path.join(charts_dir, "frame_instability.png")
-    plt.savefig(p4, dpi=160)
-    plt.close()
-    chart_paths["frame_instability"] = p4
+    # 4. Frame instability chart - removed (no instability data in simplified model)
 
     # 5. Top critical frame chart
-    top_crit = analyzed_df[analyzed_df["Status"] == STATUS_CRITICAL]
+    top_crit = analyzed_df[analyzed_df["Status"] == STATUS_SPIKE]
     if top_crit.empty:
         top_vals = analyzed_df[frame_cols].max().sort_values(ascending=False).head(10)
     else:
@@ -395,23 +357,20 @@ def generate_pdf_report(
     h2 = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=14, textColor=colors.HexColor("#111827"), spaceBefore=8, spaceAfter=8)
 
     # Cover page
-    story.append(Paragraph("Throughput Diagnostics Report", title_style))
-    story.append(Paragraph("Enterprise ML Analysis Output", sub_style))
+    story.append(Paragraph("Throughput Analysis Report", title_style))
     story.append(Spacer(1, 0.2 * inch))
-    story.append(Paragraph(f"Source CSV: {input_csv}", styles["Normal"]))
     story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
     story.append(Spacer(1, 0.2 * inch))
     story.append(
         _table(
             [
                 ["Metric", "Value"],
-                ["Total Rows Analyzed", f"{meta['rows']:,}"],
-                ["Total Anomalies", f"{meta['anomalies']:,}"],
+                ["Active Time", f"{meta['rows']:,}"],
+                ["Total Anomalies (Critical)", f"{meta['anomalies']:,}"],
                 ["Critical Rows", f"{meta['critical']:,}"],
-                ["Warning Rows", f"{meta['warning']:,}"],
-                ["Maximum Latency", f"{meta['max_latency']:.2f} us"],
-                ["Average Latency", f"{meta['avg_latency']:.2f} us"],
-                ["Health/Performance Score", f"{meta['health_score']:.2f}/100"],
+                ["Maximum Time", f"{meta['max_latency']:.2f} us"],
+                ["Average Time", f"{meta['avg_latency']:.2f} us"],
+                ["Overall Throughput %", ]
             ],
             col_widths=[2.5 * inch, 3.3 * inch],
             header_bg="#1d4ed8",
@@ -419,36 +378,24 @@ def generate_pdf_report(
     )
     story.append(PageBreak())
 
-    # Executive summary
-    story.append(Paragraph("Executive Summary", h2))
-    story.append(
-        Paragraph(
-            (
-                f"The ML pipeline analyzed <b>{meta['rows']:,}</b> rows and detected "
-                f"<b>{meta['anomalies']:,}</b> anomalous rows. "
-                f"Critical findings: <b>{meta['critical']:,}</b>, warnings: <b>{meta['warning']:,}</b>."
-            ),
-            styles["Normal"],
-        )
-    )
-    story.append(Spacer(1, 0.12 * inch))
+    
 
     # Row-wise and column-wise findings
-    story.append(Paragraph("Row-wise and Column-wise Findings", h2))
+    story.append(Paragraph("Summary", h2))
     rowwise = int((analyzed_df["Detection_Type"].str.contains("RowWise", na=False)).sum())
     colwise = int((analyzed_df["Detection_Type"].str.contains("ColumnWise", na=False)).sum())
-    story.append(_table([["Category", "Count"], ["Row-wise anomaly findings", rowwise], ["Column-wise anomaly findings", colwise]]))
+    story.append(_table([["Category", "Count"], ["Frames blown", rowwise], ["Spike", colwise]]))
     story.append(Spacer(1, 0.1 * inch))
 
     # Critical frame ranking
-    story.append(Paragraph("Critical Frame Ranking", h2))
+    story.append(Paragraph("Top 10 Maximum Frame Times", h2))
     frame_cols = [c for c in analyzed_df.columns if c.startswith("Frame_")]
-    top_critical = analyzed_df[analyzed_df["Status"] == STATUS_CRITICAL]
+    top_critical = analyzed_df[analyzed_df["Status"] == STATUS_SPIKE]
     if top_critical.empty:
         top_vals = analyzed_df[frame_cols].max().sort_values(ascending=False).head(10)
     else:
         top_vals = top_critical[frame_cols].max().sort_values(ascending=False).head(10)
-    ranking_table = [["Rank", "Frame", "Peak Latency (us)"]]
+    ranking_table = [["Rank", "Frame", "Peak Time (us)"]]
     for i, (f, v) in enumerate(top_vals.items(), start=1):
         ranking_table.append([i, f, f"{float(v):.2f}"])
     story.append(_table(ranking_table, col_widths=[0.8 * inch, 2.2 * inch, 2.8 * inch], header_bg="#dc2626"))
@@ -469,53 +416,19 @@ def generate_pdf_report(
             )
             story.append(Spacer(1, 0.05 * inch))
 
-    # Recommendations and conclusion
-    story.append(Spacer(1, 0.12 * inch))
-    story.append(Paragraph("Recommendations", h2))
-    recs = []
-    if meta["critical"] > 0:
-        recs.append("Investigate high-variance frames and optimize scheduler timing for top-ranked critical frames.")
-    if meta["avg_latency"] > 1000:
-        recs.append("Average latency is elevated; profile CPU-heavy intervals and tune frame execution order.")
-    if meta["warning"] > 0:
-        recs.append("Review warning frames for early signs of instability and threshold drift.")
-    if not recs:
-        recs.append("Current performance appears stable; continue monitoring with periodic diagnostics.")
-    for r in recs:
-        story.append(Paragraph(f"• {r}", styles["Normal"]))
-
-    conclusion = (
-        "Conclusion: The diagnostics pipeline executed successfully and produced actionable insights "
-        "with anomaly classification, frame criticality ranking, and performance health scoring."
-    )
-    story.append(Spacer(1, 0.1 * inch))
-    story.append(Paragraph("Final Conclusion", h2))
-    story.append(Paragraph(conclusion, styles["Normal"]))
+    # Recommendations and conclusio
+    
+    
     story.append(PageBreak())
 
-    # Visualizations
-    story.append(Paragraph("Visual Charts", h2))
-    for key in [
-        "latency_distribution",
-        "anomaly_frequency",
-        "spike_timeline",
-        "frame_instability",
-        "top_critical_frames",
-    ]:
-        p = chart_paths.get(key)
-        if p and os.path.exists(p):
-            story.append(Paragraph(key.replace("_", " ").title(), styles["Heading3"]))
-            story.append(Image(p, width=6.5 * inch, height=2.6 * inch))
-            story.append(Spacer(1, 0.08 * inch))
-
-    doc.build(story)
+ 
 
 
 def run_pipeline(input_csv: str, output_dir: str):
     base_name = os.path.splitext(os.path.basename(input_csv))[0]
 
     base_df, frame_cols, validation = validate_and_prepare_csv(input_csv)
-    analyzed_df, warning_mask, critical_mask, meta = analyze_dataframe(base_df, frame_cols)
+    analyzed_df, critical_mask, meta = analyze_dataframe(base_df, frame_cols)
 
     excel_path, anomaly_csv_path, anomaly_count = save_excel_and_csv(analyzed_df, frame_cols, base_name, output_dir)
 
@@ -530,7 +443,6 @@ def run_pipeline(input_csv: str, output_dir: str):
         "rows": meta["rows"],
         "anomalies": anomaly_count,
         "critical": meta["critical"],
-        "warning": meta["warning"],
         "avg_latency": round(meta["avg_latency"], 3),
         "max_latency": round(meta["max_latency"], 3),
         "health_score": round(meta["health_score"], 3),
@@ -552,19 +464,6 @@ def main():
 
     try:
         result = run_pipeline(args.input, args.output_dir)
-        print("=== Throughput Diagnostics Pipeline Result ===")
-        print(f"Total rows analyzed: {result['rows']}")
-        print(f"Total anomalies: {result['anomalies']}")
-        print(f"Critical rows: {result['critical']}")
-        print(f"Warning rows: {result['warning']}")
-        print(f"Average latency: {result['avg_latency']} us")
-        print(f"Maximum latency: {result['max_latency']} us")
-        print(f"Health score: {result['health_score']}/100")
-        print(f"Excel: {result['excel_path']}")
-        print(f"Anomalies CSV: {result['anomaly_csv_path']}")
-        print(f"PDF: {result['pdf_path']}")
-        print(f"Charts generated: {len(result['charts'])}")
-        print(f"Execution status: {result['execution_status']}")
         print(json.dumps(result))
     except Exception as exc:
         error_payload = {"status": "error", "message": str(exc), "execution_status": "failed"}

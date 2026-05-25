@@ -74,6 +74,7 @@ class Api:
 
         self._last_exported_csv_path: str | None = None
         self._analysis_excel_path: str | None = None
+        self._analysis_pdf_path: str | None = None
         self._analysis_temp_dir: str | None = None
 
     def _reset_session_state(self) -> None:
@@ -90,6 +91,7 @@ class Api:
             self._frame_counts = [0] * CHUNK_SIZE
             self._top10_frames = []
         self._analysis_excel_path = None
+        self._analysis_pdf_path = None
         self._analysis_temp_dir = None
         self._last_exported_csv_path = None
 
@@ -166,21 +168,28 @@ class Api:
                 return
 
             try:
-                result = json.loads(completed.stdout.strip() or "{}")
-            except json.JSONDecodeError:
+                # Extract JSON from output (in case there are debug prints)
+                output_text = completed.stdout.strip()
+                json_start = output_text.find('{')
+                if json_start == -1:
+                    raise json.JSONDecodeError("No JSON object found", output_text, 0)
+                result = json.loads(output_text[json_start:])
+            except (json.JSONDecodeError, ValueError) as e:
+                error_msg = f"Analysis completed but the model returned an invalid response: {str(e)}"
                 window.evaluate_js(
-                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but the model returned an invalid response.')})"
+                    f"window._app && window._app.onAnalysisError({json.dumps(error_msg)})"
                 )
                 return
 
-            output_path = result.get("output_path")
-            if not output_path or not os.path.exists(output_path):
+            pdf_path = result.get("pdf_path")  # PDF report from ML analysis
+            if not pdf_path or not os.path.exists(pdf_path):
                 window.evaluate_js(
-                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no Excel report was generated.')})"
+                    f"window._app && window._app.onAnalysisError({json.dumps('Analysis completed but no PDF report was generated.')})"
                 )
                 return
 
-            self._analysis_excel_path = output_path
+            self._analysis_pdf_path = pdf_path
+            self._analysis_excel_path = result.get("excel_path")  # Store Excel path as well for reference
             window.evaluate_js(
                 f"window._app && window._app.onAnalysisComplete({json.dumps({'message': 'Patterns Analyzed Successfully'})})"
             )
@@ -206,23 +215,23 @@ class Api:
         return json.dumps({"status": "ok", "message": "Analysis started."})
 
     def download_excel(self) -> str:
-        if not self._analysis_excel_path or not os.path.exists(self._analysis_excel_path):
-            return json.dumps({"status": "error", "message": "No analyzed Excel report is available."})
+        if not self._analysis_pdf_path or not os.path.exists(self._analysis_pdf_path):
+            return json.dumps({"status": "error", "message": "No analyzed PDF report is available."})
 
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_name = f"throughput_{ts}_ML_Analyzed.xlsx"
+            default_name = f"throughput_{ts}_Analysis_Report.pdf"
             result = window.create_file_dialog(
                 webview.FileDialog.SAVE,
                 save_filename=default_name,
-                file_types=["Excel Files (*.xlsx)", "All files (*.*)"]
+                file_types=["PDF Files (*.pdf)", "All files (*.*)"]
             )
 
             if not result:
                 return json.dumps({"status": "cancelled", "message": "Download cancelled."})
 
             filepath = result if isinstance(result, str) else result[0]
-            shutil.copyfile(self._analysis_excel_path, filepath)
+            shutil.copyfile(self._analysis_pdf_path, filepath)
             return json.dumps({"status": "ok", "path": filepath})
         except Exception as exc:
             return json.dumps({"status": "error", "message": str(exc)})
