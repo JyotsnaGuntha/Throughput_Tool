@@ -19,7 +19,7 @@ from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, S
 
 ROW_THRESHOLD_US = 2000.0
 CRIT_Z = 3.0
-CRIT_ABS_DIFF = 200.0
+CRIT_ABS_DIFF = 300.0
 CRIT_DELTA = 250.0
 MIN_STD = 25.0
 MAX_REASON_FRAMES = 8
@@ -134,8 +134,16 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
     var_instability = rolling_var > (rolling_var.mean() + rolling_var.std(ddof=0)).fillna(0)
     unstable_mask = (ma_instability | var_instability).any(axis=1)
 
-    critical_spike = (diff > 0) & ((z_scores >= CRIT_Z) | (abs_diff >= CRIT_ABS_DIFF) | (deltas >= CRIT_DELTA))
-    critical_drop = (diff < 0) & ((z_scores >= CRIT_Z) | (abs_diff >= CRIT_ABS_DIFF) | (deltas <= -CRIT_DELTA))
+    # For column-wise spike detection: only consider frames where average is far greater than baseline
+    # Calculate overall mean across all frames
+    global_mean = work_df[frame_cols].values.mean()
+    
+    # Flag frames (columns) where average is significantly higher than global mean (1.5x threshold)
+    frame_high_performers = means > (global_mean * 1.5)
+    
+    # Only apply critical detection to high-performing frames
+    critical_spike = (diff > 0) & ((z_scores >= CRIT_Z) | (abs_diff >= CRIT_ABS_DIFF) | (deltas >= CRIT_DELTA)) & frame_high_performers
+    critical_drop = (diff < 0) & ((z_scores >= CRIT_Z) | (abs_diff >= CRIT_ABS_DIFF) | (deltas <= -CRIT_DELTA)) & frame_high_performers
 
     critical_mask = critical_spike | critical_drop
 
@@ -153,7 +161,6 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
     critical_frames_col = []
     highlight_color_col = []
     severity_scores = []
-    health_scores = []
 
     severity_matrix = (z_scores * 0.5) + (abs_diff.divide(means.replace(0, 1), axis=1) * 0.3) + (
         rolling_var.divide(stds, axis=1) * 0.2
@@ -167,7 +174,6 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
 
         row_severity = float(severity_matrix.loc[idx].mean())
         severity_scores.append(row_severity)
-        health_scores.append(max(0.0, 100.0 - min(100.0, row_severity * 20.0)))
 
         if status.loc[idx] == STATUS_SPIKE:
             highlight_color_col.append(COLOR_CRITICAL)
@@ -200,7 +206,6 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
     out_df["Highlight_Color"] = highlight_color_col
     out_df["Row_Anomaly_Score"] = work_df[frame_cols].max(axis=1)
     out_df["Severity_Score"] = severity_scores
-    out_df["Frame_Health_Score"] = health_scores
 
     critical_count = int((out_df["Status"] == STATUS_SPIKE).sum())
     anomalies = int((out_df["Status"] != STATUS_NORMAL).sum())
@@ -208,6 +213,16 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
     # Count RowWise and ColumnWise detections for metrics
     frames_blown = int((out_df["Detection_Type"].str.contains("RowWise", na=False)).sum())
     spikes_detected = int((out_df["Detection_Type"].str.contains("ColumnWise", na=False)).sum())
+    
+
+    # Calculate Overall Throughput Percentage
+    # Formula: (Total_Consumed_Time / Total_Expected_Time) × 100
+    # Where:
+    #   Total_Consumed_Time = Sum of all frame values (in microseconds)
+    #   Total_Expected_Time = Number_of_Logged_Seconds × 500 frames/second × 2000 microseconds/frame
+    total_consumed_time = float(work_df[frame_cols].values.sum())
+    total_expected_time = len(out_df) * 500 * 2000  # seconds × frames_per_second × microseconds_per_frame
+    throughput_percentage = (total_consumed_time / total_expected_time) * 100 if total_expected_time > 0 else 0
 
     meta = {
         "rows": len(out_df),
@@ -217,7 +232,7 @@ def analyze_dataframe(base_df: pd.DataFrame, frame_cols: list[str]) -> tuple[pd.
         "spikes_detected": spikes_detected,
         "avg_latency": float(work_df[frame_cols].mean().mean()),
         "max_latency": float(work_df[frame_cols].max().max()),
-        "health_score": float(pd.Series(health_scores).mean() if health_scores else 100.0),
+        "throughput_percentage": round(throughput_percentage, 2),
     }
 
     return out_df, critical_mask, meta
@@ -238,7 +253,6 @@ def save_excel_and_csv(analyzed_df: pd.DataFrame, frame_cols: list[str], base_na
         "Highlight_Color",
         "Row_Anomaly_Score",
         "Severity_Score",
-        "Frame_Health_Score",
     ] + frame_cols
 
     final_df = analyzed_df[ordered_cols]
@@ -359,7 +373,7 @@ def generate_pdf_report(
                 ["Spikes Detected", f"{meta['spikes_detected']:,}"],
                 ["Maximum Time", f"{meta['max_latency']:.2f} us"],
                 ["Average Time", f"{meta['avg_latency']:.2f} us"],
-                ["Overall Throughput %", ]
+                ["Overall Throughput %", f"{meta['throughput_percentage']:.2f}%"]
             ],
             col_widths=[2.5 * inch, 3.3 * inch],
             header_bg="#1d4ed8",
@@ -436,7 +450,6 @@ def run_pipeline(input_csv: str, output_dir: str):
         "critical": meta["critical"],
         "avg_latency": round(meta["avg_latency"], 3),
         "max_latency": round(meta["max_latency"], 3),
-        "health_score": round(meta["health_score"], 3),
         "validation": validation,
         "excel_path": excel_path,
         "anomaly_csv_path": anomaly_csv_path,

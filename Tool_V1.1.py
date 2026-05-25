@@ -420,35 +420,35 @@ class Api:
         performance = int(max(0, 100 - (blown_ratio * 100)))
         return performance
 
-    def _generate_insights(self, summary: dict) -> list[str]:
-        insights = []
-        if summary['rows'] > 0:
-            insights.append(f"Analyzed {summary['rows']:,} data points over {summary['seconds']} seconds of operation.")
-            if summary['blown'] == 0:
-                insights.append("All frame response times remained within the acceptable threshold (<2000µs).")
-            else:
-                blown_pct = (summary['blown'] / summary['rows']) * 100
-                insights.append(f"{blown_pct:.2f}% of frames exceeded the 2000µs performance threshold.")
-            if summary['avg_us'] < 500:
-                insights.append("Average response time is excellent, indicating optimal system performance.")
-            elif summary['avg_us'] < 1000:
-                insights.append("Average response time is good with normal operational parameters.")
-            else:
-                insights.append("Average response time shows moderate latency; monitoring recommended.")
-        return insights
+    # def _generate_insights(self, summary: dict) -> list[str]:
+    #     insights = []
+    #     if summary['rows'] > 0:
+    #         insights.append(f"Analyzed {summary['rows']:,} data points over {summary['seconds']} seconds of operation.")
+    #         if summary['blown'] == 0:
+    #             insights.append("All frame response times remained within the acceptable threshold (<2000µs).")
+    #         else:
+    #             blown_pct = (summary['blown'] / summary['rows']) * 100
+    #             insights.append(f"{blown_pct:.2f}% of frames exceeded the 2000µs performance threshold.")
+    #         if summary['avg_us'] < 500:
+    #             insights.append("Average response time is excellent, indicating optimal system performance.")
+    #         elif summary['avg_us'] < 1000:
+    #             insights.append("Average response time is good with normal operational parameters.")
+    #         else:
+    #             insights.append("Average response time shows moderate latency; monitoring recommended.")
+    #     return insights
 
-    def _generate_recommendations(self, summary: dict) -> list[str]:
-        recommendations = []
-        if summary['blown'] > 0:
-            recommendations.append("Investigate and optimize processes that caused frame delays exceeding the 2000µs threshold.")
-            recommendations.append("Consider adjusting scheduler priorities or reducing concurrent workloads.")
-        if summary['avg_us'] > 1500:
-            recommendations.append("Review system resource utilization and background processes for potential optimization.")
-        if summary['max_us'] > 3000:
-            recommendations.append("The maximum latency spike indicates a potential bottleneck; prioritize performance profiling.")
-        if not recommendations:
-            recommendations.append("Current performance metrics are within acceptable ranges. Continue regular monitoring.")
-        return recommendations
+    # def _generate_recommendations(self, summary: dict) -> list[str]:
+    #     recommendations = []
+    #     if summary['blown'] > 0:
+    #         recommendations.append("Investigate and optimize processes that caused frame delays exceeding the 2000µs threshold.")
+    #         recommendations.append("Consider adjusting scheduler priorities or reducing concurrent workloads.")
+    #     if summary['avg_us'] > 1500:
+    #         recommendations.append("Review system resource utilization and background processes for potential optimization.")
+    #     if summary['max_us'] > 3000:
+    #         recommendations.append("The maximum latency spike indicates a potential bottleneck; prioritize performance profiling.")
+    #     if not recommendations:
+    #         recommendations.append("Current performance metrics are within acceptable ranges. Continue regular monitoring.")
+    #     return recommendations
 
     def _generate_conclusion(self, summary: dict) -> str:
         perf_index = self._calculate_performance_index(summary)
