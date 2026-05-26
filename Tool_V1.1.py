@@ -77,6 +77,10 @@ class Api:
         self._analysis_excel_path: str | None = None
         self._analysis_pdf_path: str | None = None
         self._analysis_temp_dir: str | None = None
+        
+        # Active time tracking
+        self._session_start_time: float | None = None
+        self._active_duration_seconds: int = 0
 
     def _reset_session_state(self) -> None:
         with self._lock:
@@ -95,6 +99,8 @@ class Api:
         self._analysis_pdf_path = None
         self._analysis_temp_dir = None
         self._last_exported_csv_path = None
+        self._session_start_time = None
+        self._active_duration_seconds = 0
 
     def _build_summary(self) -> dict[str, int]:
         with self._lock:
@@ -511,6 +517,8 @@ class Api:
             return json.dumps({"status": "error", "message": "Not connected to any port."})
         try:
           self._reset_session_state()
+          self._session_start_time = time.time()  # Start the timer
+          self._active_duration_seconds = 0
           self._ser.reset_input_buffer()
           self._ser.write(START_FRAME)
           self._running = True
@@ -595,6 +603,8 @@ class Api:
 
     def stop_analysis(self) -> str:
         self._running = False
+        if self._session_start_time is not None:
+            self._active_duration_seconds = int(time.time() - self._session_start_time)
         try:
             if not self._ser or not self._ser.is_open:
                 return json.dumps({"status": "error", "message": "Serial port not open."})
@@ -615,7 +625,13 @@ class Api:
         except Exception as exc:
             return json.dumps({"status": "error", "message": str(exc)})
 
-    def get_default_csv_name(self) -> str:
+    def get_active_time(self) -> str:
+        """Returns current active duration in seconds"""
+        if self._running and self._session_start_time is not None:
+            elapsed = int(time.time() - self._session_start_time)
+            return json.dumps({"status": "ok", "seconds": elapsed})
+        else:
+            return json.dumps({"status": "ok", "seconds": self._active_duration_seconds})
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         name = f"throughput_{ts}.csv"
         home = os.path.expanduser("~")
@@ -936,6 +952,49 @@ body.light-theme .top-status {
 body.light-theme .control-panel {
   background: #ffffff;
   border-left-color: #d1d5db;
+}
+
+/* Active Time Timer */
+.active-timer {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+body.light-theme .active-timer {
+  background: #ffffff;
+  border-color: #d1d5db;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.timer-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.timer-display {
+  font-size: 18px;
+  color: var(--cyan);
+  font-weight: 600;
+  min-width: 90px;
+  text-align: right;
+}
+
+.timer-display.active {
+  color: var(--green);
 }
 
 .ctrl-row {
@@ -2683,6 +2742,12 @@ body.light-theme #analysisDetail .metric-detail-section {
     </div>
   </div>
 
+  <!-- Active Time Timer -->
+  <div class="active-timer" id="activeTimer">
+    <div class="timer-label">Active Time</div>
+    <div class="timer-display" id="timerDisplay">00:00:00</div>
+  </div>
+
 </div>
 
 <!-- Alert overlay -->
@@ -2988,6 +3053,10 @@ const app = (() => {
   let currentMetricShown = null;
   let lastUsbConnected = null;
   
+  // Timer tracking
+  let timerInterval = null;
+  let elapsedSeconds = 0;
+
   let metricData = {
     blown: 0,
     avgUs: 0,
@@ -3179,6 +3248,9 @@ async function refreshPorts() {
       }
       
       connected = false; running = false; canExport = false; canAnalyze = false; canDownloadExcel = false; analysisRunning = false;
+      stopTimer();
+      elapsedSeconds = 0;
+      updateTimerDisplay();
       updateUsbStatus(false);
       showAlert("Disconnected", "Successfully disconnected from the port.", "warning");
     } else {
@@ -3197,6 +3269,42 @@ async function refreshPorts() {
     sync();
   }
 
+  function startTimer() {
+    elapsedSeconds = 0;
+    updateTimerDisplay();
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      if (running) {
+        elapsedSeconds++;
+        updateTimerDisplay();
+      }
+    }, 1000);
+  }
+
+  function stopTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+  }
+
+  function updateTimerDisplay() {
+    const hrs = Math.floor(elapsedSeconds / 3600);
+    const mins = Math.floor((elapsedSeconds % 3600) / 60);
+    const secs = elapsedSeconds % 60;
+    const timeStr = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    
+    const timerDisplay = document.getElementById('timerDisplay');
+    if (timerDisplay) {
+      timerDisplay.textContent = timeStr;
+      if (running) {
+        timerDisplay.classList.add('active');
+      } else {
+        timerDisplay.classList.remove('active');
+      }
+    }
+  }
+
   async function startAnalysis() {
     const r = JSON.parse(await window.pywebview.api.start_analysis());
     if (r.status === 'ok') {
@@ -3207,6 +3315,7 @@ async function refreshPorts() {
       metricData.top10 = [];
       showChartView();
       setStats(0, 0, 0, 0); drawChart();
+      startTimer();
       showAlert("Analysis Started", "Receiving chunks every second...", "info");
     } else {
       showAlert("Start Failed", r.message, "error");
@@ -3217,6 +3326,7 @@ async function refreshPorts() {
   async function stopAnalysis() {
     const r = JSON.parse(await window.pywebview.api.stop_analysis());
     running = false;
+    stopTimer();
     if (r.status === 'ok') {
       showChartView();
       canExport = true;
@@ -3225,6 +3335,7 @@ async function refreshPorts() {
       showAlert("Analysis Complete", r.message + (r.ack_received ? ' (ACK received)' : ' (ACK timeout)'), "success");
       const s = JSON.parse(await window.pywebview.api.get_summary());
       setStats(s.blown, s.avg_us, s.max_us, s.max_frame);
+      updateTimerDisplay();
     } else {
       showAlert("Stop Error", r.message, "error");
     }
