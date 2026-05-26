@@ -959,7 +959,6 @@ body.light-theme .control-panel {
   position: fixed;
   bottom: 20px;
   right: 20px;
-  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r);
   padding: 12px 16px;
@@ -967,7 +966,6 @@ body.light-theme .control-panel {
   align-items: center;
   gap: 10px;
   font-family: 'JetBrains Mono', monospace;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 100;
 }
 
@@ -986,10 +984,10 @@ body.light-theme .active-timer {
 }
 
 .timer-display {
-  font-size: 18px;
+  font-size: 14px;
   color: var(--cyan);
   font-weight: 600;
-  min-width: 90px;
+  min-width: 80px;
   text-align: right;
 }
 
